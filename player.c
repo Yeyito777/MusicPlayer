@@ -32,6 +32,7 @@ static const char *songs_dir = SONGS_DIR;
 static char *songs[MAX_SONGS];
 static int nsongs = 0;
 static int cursor = 0;
+static int scroll_offset = 0;
 static int playing = -1;
 static double song_pos = 0;
 static double song_dur = 0;
@@ -440,17 +441,21 @@ static void draw(void) {
 	for (int i = 0; i < main_cols && len < (int)sizeof(buf) - 1; i++)
 		buf[len++] = '-';
 
-	/* song list */
+	/* song list — vim-style edge scrolling */
 	int count = display_len();
-	int offset = 0;
-	if (count > list_rows) {
-		offset = cursor - list_rows / 2;
-		if (offset < 0) offset = 0;
-		if (offset > count - list_rows) offset = count - list_rows;
-	}
+	if (cursor < scroll_offset)
+		scroll_offset = cursor;
+	else if (cursor >= scroll_offset + list_rows)
+		scroll_offset = cursor - list_rows + 1;
+	if (count <= list_rows)
+		scroll_offset = 0;
+	else if (scroll_offset > count - list_rows)
+		scroll_offset = count - list_rows;
+	if (scroll_offset < 0)
+		scroll_offset = 0;
 
-	for (int i = 0; i < list_rows && (i + offset) < count; i++) {
-		int dpos = i + offset;
+	for (int i = 0; i < list_rows && (i + scroll_offset) < count; i++) {
+		int dpos = i + scroll_offset;
 		int sidx = song_at(dpos);
 		const char *prefix = "  ";
 		const char *style = "";
@@ -828,6 +833,55 @@ int main(int argc, char **argv) {
 		case 'G':
 			if (display_len() > 0) cursor = display_len() - 1;
 			break;
+		case 0x05: { /* Ctrl+E — scroll down one line */
+			int cnt = display_len();
+			int lr = term_rows() - 4;
+			if (cnt > lr && scroll_offset < cnt - lr)
+				scroll_offset++;
+			if (cursor < scroll_offset)
+				cursor = scroll_offset;
+			break;
+		}
+		case 0x19: { /* Ctrl+Y — scroll up one line */
+			int lr = term_rows() - 4;
+			if (scroll_offset > 0)
+				scroll_offset--;
+			if (cursor >= scroll_offset + lr)
+				cursor = scroll_offset + lr - 1;
+			break;
+		}
+		case 0x04: { /* Ctrl+D — scroll down half page */
+			int half = (term_rows() - 4) / 2;
+			int cnt = display_len();
+			cursor += half;
+			scroll_offset += half;
+			if (cursor >= cnt) cursor = cnt - 1;
+			break;
+		}
+		case 0x15: { /* Ctrl+U — scroll up half page */
+			int half = (term_rows() - 4) / 2;
+			cursor -= half;
+			scroll_offset -= half;
+			if (cursor < 0) cursor = 0;
+			if (scroll_offset < 0) scroll_offset = 0;
+			break;
+		}
+		case 0x06: { /* Ctrl+F — scroll down full page */
+			int lr = term_rows() - 4;
+			int cnt = display_len();
+			cursor += lr;
+			scroll_offset += lr;
+			if (cursor >= cnt) cursor = cnt - 1;
+			break;
+		}
+		case 0x02: { /* Ctrl+B — scroll up full page */
+			int lr = term_rows() - 4;
+			cursor -= lr;
+			scroll_offset -= lr;
+			if (cursor < 0) cursor = 0;
+			if (scroll_offset < 0) scroll_offset = 0;
+			break;
+		}
 		}
 
 		draw();
