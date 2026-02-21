@@ -9,10 +9,6 @@
 
 ## Later
 - [x] Search / filter songs by typing /
-- [ ] Nested directory support (browse subdirectories inside songs/)
-- [ ] Album/artist grouping from ID3 tags
-- [ ] Configurable keybinds via config file
-- [ ] Configurable songs directory via CLI arg or env var
-- [ ] SIGWINCH handler for live resize without keypress
-- [ ] Queue system (add songs to play next)
-- [ ] Visual seek bar that updates in real-time (non-blocking read with poll/select)
+- [x] Playlists
+- [x] Audio bar
+- [ ] Scrolling faster with Ctrl+<key> vim keybinds

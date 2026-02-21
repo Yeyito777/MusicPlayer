@@ -626,6 +626,18 @@ int main(int argc, char **argv) {
 		if (strcmp(argv[i], "--tmux") == 0)
 			tmux_mode = 1;
 
+	const char *home = getenv("MUSIC_PLAYER_HOME");
+	if (home) {
+		static char songs_path[PATH_MAX];
+		static char playlists_path[PATH_MAX];
+		static char config_path[PATH_MAX];
+		snprintf(songs_path, sizeof(songs_path), "%s/%s", home, SONGS_DIR);
+		snprintf(playlists_path, sizeof(playlists_path), "%s/%s", home, PLAYLISTS_DIR);
+		snprintf(config_path, sizeof(config_path), "%s/%s", home, CONFIG_FILE);
+		songs_dir = songs_path;
+		playlists_dir = playlists_path;
+		config_file = config_path;
+	}
 	const char *env_dir = getenv("SONGS_DIR");
 	if (env_dir)
 		songs_dir = env_dir;
