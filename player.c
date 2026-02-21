@@ -4,12 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
 #define MAX_SONGS 1024
 #define SONGS_DIR "songs"
+#define MPV_SOCKET "/tmp/musicplayer-mpv.sock"
 
 static struct termios orig_termios;
 static pid_t mpv_pid = -1;
@@ -31,6 +34,16 @@ static void term_restore(void) {
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
+static void mpv_cmd(const char *cmd) {
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) return;
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	strncpy(addr.sun_path, MPV_SOCKET, sizeof(addr.sun_path) - 1);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+		write(fd, cmd, strlen(cmd));
+	close(fd);
+}
+
 static void kill_mpv(void) {
 	if (mpv_pid > 0) {
 		kill(mpv_pid, SIGTERM);
@@ -39,6 +52,7 @@ static void kill_mpv(void) {
 		paused = 0;
 		playing = -1;
 	}
+	unlink(MPV_SOCKET);
 }
 
 static void cleanup(void) {
@@ -180,7 +194,8 @@ static void play_song(int idx) {
 		/* redirect stdout/stderr to /dev/null */
 		freopen("/dev/null", "w", stdout);
 		freopen("/dev/null", "w", stderr);
-		execlp("mpv", "mpv", "--no-video", "--no-terminal", path, NULL);
+		execlp("mpv", "mpv", "--no-video", "--no-terminal",
+			"--input-ipc-server=" MPV_SOCKET, path, NULL);
 		_exit(1);
 	} else if (pid > 0) {
 		mpv_pid = pid;
@@ -234,14 +249,17 @@ int main(void) {
 			break;
 		case 'p':
 			if (mpv_pid > 0) {
-				if (paused) {
-					kill(mpv_pid, SIGCONT);
-					paused = 0;
-				} else {
-					kill(mpv_pid, SIGSTOP);
-					paused = 1;
-				}
+				mpv_cmd("{\"command\":[\"cycle\",\"pause\"]}\n");
+				paused = !paused;
 			}
+			break;
+		case 'h':
+			if (mpv_pid > 0)
+				mpv_cmd("{\"command\":[\"seek\",\"-5\"]}\n");
+			break;
+		case 'l':
+			if (mpv_pid > 0)
+				mpv_cmd("{\"command\":[\"seek\",\"5\"]}\n");
 			break;
 		case 's':
 			kill_mpv();
