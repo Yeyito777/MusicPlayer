@@ -3,9 +3,9 @@
 ## Next
 - [x] Progress bar showing current position / duration
 - [x] Volume control (- / +)
-- [ ] Auto-play next song when current one ends
-- [ ] Shuffle mode
+- [x] Auto-play next song when current one ends
 - [ ] Loop modes (single / all / off)
+- [ ] Shuffle mode
 
 ## Later
 - [ ] Search / filter songs by typing /

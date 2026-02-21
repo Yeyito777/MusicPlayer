@@ -188,10 +188,31 @@ with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
 	wait_ms 400
 	assert_not_contains "stopped clears progress bar" "[playing]"
 	rm -f "$DIR/songs/test-tone.wav"
+
+	echo ""
+	echo "Auto-play next song (requires mpv)"
+	# Generate two short WAVs: first (1s) finishes, second (3s) should auto-start
+	python3 -c "
+import wave
+for name, frames in [('aaa-first.wav', 44100), ('aab-second.wav', 132300)]:
+    with wave.open('$DIR/songs/' + name, 'w') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b'\x00\x00' * frames)
+"
+	start
+	# aaa-first.wav sorts first; play it and wait for it to end
+	send Enter
+	sleep 3
+	# Should now be playing aab-second.wav
+	assert_contains "auto-play started next song" "aab-second.wav"
+	rm -f "$DIR/songs/aaa-first.wav" "$DIR/songs/aab-second.wav"
 else
 	skip "progress bar shows during playback (no mpv)"
 	skip "progress bar has time display (no mpv)"
 	skip "stop clears progress bar (no mpv)"
+	skip "auto-play next song (no mpv)"
 fi
 
 # --- summary ---

@@ -314,9 +314,15 @@ static void check_child(void) {
 		int status;
 		pid_t ret = waitpid(mpv_pid, &status, WNOHANG);
 		if (ret == mpv_pid) {
+			int prev = playing;
 			mpv_pid = -1;
 			paused = 0;
 			playing = -1;
+			song_pos = 0;
+			song_dur = 0;
+			/* auto-play next song */
+			if (prev >= 0 && prev + 1 < nsongs)
+				play_song(prev + 1);
 		}
 	}
 }
