@@ -31,20 +31,24 @@ Commands currently used:
 | `["seek", "5"]`                       | seek forward 5s      |
 | `["seek", "-5"]`                      | seek back 5s         |
 | `["cycle", "pause"]`                  | toggle pause/resume  |
+| `["get_property", "time-pos"]`        | current position (s) |
+| `["get_property", "duration"]`        | total duration (s)   |
+
+## Property queries
+
+`mpv_get_double()` sends a `get_property` command, reads the JSON response with `poll()` + `read()` (100ms timeout), and parses `"data":123.456` with `strstr` + `strtod`. Returns -1 on failure.
+
+`update_position()` queries `time-pos` and `duration` on each main loop iteration (when playing and not paused), storing results in `song_pos` and `song_dur`.
 
 ## Extending
 
 Other useful mpv IPC commands for future features:
 
 ```json
-{"command":["get_property","time-pos"]}      // current position (seconds)
-{"command":["get_property","duration"]}       // total duration
 {"command":["get_property","volume"]}         // current volume
 {"command":["set_property","volume",80]}      // set volume to 80
 {"command":["seek","30","absolute"]}          // seek to 30s absolute
 ```
-
-Responses come back as JSON on the same socket. To read them you'd need to `read()` after writing — currently we fire-and-forget.
 
 ## mpv docs
 

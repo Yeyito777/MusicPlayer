@@ -9,6 +9,9 @@ BINARY="$DIR/../musicplayer"
 SESSION="musicplayer-test-$$"
 PASS=0
 FAIL=0
+SKIP=0
+HAS_MPV=0
+command -v mpv >/dev/null 2>&1 && HAS_MPV=1
 
 # --- helpers ---
 
@@ -63,6 +66,12 @@ assert_not_contains() {
 		printf "  \033[32mPASS\033[0m %s\n" "$label"
 		PASS=$((PASS + 1))
 	fi
+}
+
+skip() {
+	local label="$1"
+	printf "  \033[33mSKIP\033[0m %s\n" "$label"
+	SKIP=$((SKIP + 1))
 }
 
 assert_session_dead() {
@@ -144,13 +153,53 @@ start
 send q
 assert_session_dead "q exits cleanly"
 
+echo ""
+echo "Help text"
+start
+assert_contains "shows help with seek hint" "h/l:seek"
+
+echo ""
+echo "Progress bar (requires mpv)"
+if [ "$HAS_MPV" -eq 1 ]; then
+	# Generate a 2-second silent WAV for playback tests
+	python3 -c "
+import struct, wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 88200)
+"
+	start
+	# Navigate to test-tone.wav (4th item: alpha, beta, gamma, test-tone)
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 1
+	assert_contains "shows playing state" "[playing]"
+	assert_contains "progress bar has time" "0:0"
+	# Stop and verify progress bar goes away
+	send s
+	wait_ms 400
+	assert_not_contains "stopped clears progress bar" "[playing]"
+	rm -f "$DIR/songs/test-tone.wav"
+else
+	skip "progress bar shows during playback (no mpv)"
+	skip "progress bar has time display (no mpv)"
+	skip "stop clears progress bar (no mpv)"
+fi
+
 # --- summary ---
 
 echo ""
 TOTAL=$((PASS + FAIL))
 echo "====================="
 if [ "$FAIL" -eq 0 ]; then
-	printf "\033[32mAll %d tests passed.\033[0m\n" "$TOTAL"
+	printf "\033[32mAll %d tests passed.\033[0m" "$TOTAL"
+	[ "$SKIP" -gt 0 ] && printf " (%d skipped)" "$SKIP"
+	printf "\n"
 else
 	printf "\033[31m%d/%d tests failed.\033[0m\n" "$FAIL" "$TOTAL"
 	exit 1
