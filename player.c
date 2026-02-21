@@ -467,11 +467,17 @@ int main(int argc, char **argv) {
 				mpv_cmd("{\"command\":[\"add\",\"volume\",-5]}\n");
 			break;
 		case 'm':
-			loop_mode = (loop_mode == LOOP_ALL) ? LOOP_SINGLE : LOOP_ALL;
+			if (loop_mode == LOOP_SINGLE) {
+				loop_mode = LOOP_ALL;
+			} else {
+				loop_mode = LOOP_SINGLE;
+				shuffle = 0;
+			}
 			break;
 		case 'n':
 			shuffle = !shuffle;
 			if (shuffle) {
+				loop_mode = LOOP_ALL;
 				shuffle_clear();
 				if (playing >= 0) shuffle_mark(playing);
 			}
