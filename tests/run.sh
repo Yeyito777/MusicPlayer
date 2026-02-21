@@ -24,7 +24,7 @@ start() {
 	cleanup
 	# Launch in a fixed 80x24 tmux pane with test songs dir
 	tmux new-session -d -s "$SESSION" -x 80 -y 24 \
-		"cd $DIR && SONGS_DIR=songs $BINARY --tmux; echo __EXITED__; sleep 10"
+		"cd $DIR && SONGS_DIR=songs $BINARY --tmux; echo; echo __EXITED__; sleep 10"
 	sleep 0.4
 }
 
@@ -76,7 +76,7 @@ skip() {
 
 assert_session_dead() {
 	local label="$1"
-	sleep 0.3
+	sleep 0.5
 	if tmux has-session -t "$SESSION" 2>/dev/null; then
 		local screen
 		screen="$(capture)"
@@ -160,6 +160,7 @@ assert_contains "shows play/pause hint" "spc:play/pause"
 assert_contains "shows seek hint" "h/l:seek"
 assert_contains "shows volume hint" "-/+:vol"
 assert_contains "shows loop hint" "m:loop"
+assert_contains "shows shuffle hint" "n:shuffle"
 assert_contains "shows stop hint" "esc:stop"
 
 echo ""
@@ -262,6 +263,38 @@ for name, frames in [('aaa-wrap-target.wav', 132300), ('zzz-wrap-source.wav', 44
 	# Should have wrapped to aaa-wrap-target.wav
 	assert_contains "playlist wraps to first song" "aaa-wrap-target.wav"
 	rm -f "$DIR/songs/aaa-wrap-target.wav" "$DIR/songs/zzz-wrap-source.wav"
+
+	echo ""
+	echo "Shuffle mode (requires mpv)"
+	python3 -c "
+import wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 88200)
+"
+	start
+	# Navigate to test-tone.wav and play it
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 1
+	# Toggle shuffle on
+	send n
+	wait_ms 300
+	assert_contains "n toggles shuffle indicator" "[shuffle]"
+	assert_contains "n shows shuffle next to song" "test-tone.wav [shuffle]"
+	# Toggle shuffle off
+	send n
+	wait_ms 300
+	assert_not_contains "n toggles shuffle off" "[shuffle]"
+	assert_not_contains "shuffle tag removed from song" "test-tone.wav [shuffle]"
+	send Escape
+	wait_ms 300
+	rm -f "$DIR/songs/test-tone.wav"
 else
 	skip "progress bar shows during playback (no mpv)"
 	skip "progress bar has time display (no mpv)"
@@ -269,6 +302,7 @@ else
 	skip "auto-play next song (no mpv)"
 	skip "loop mode toggle (no mpv)"
 	skip "playlist wraps to first song (no mpv)"
+	skip "shuffle mode toggle (no mpv)"
 fi
 
 # --- summary ---

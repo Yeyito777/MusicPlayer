@@ -40,6 +40,9 @@ All state is file-scope static:
 | `cursor`       | int        | highlighted list index           |
 | `playing`      | int        | index of playing song, -1 if none|
 | `loop_mode`    | int        | LOOP_ALL (0) or LOOP_SINGLE (1)  |
+| `shuffle`      | int        | shuffle mode on/off              |
+| `played[]`     | int[1024]  | bitset of played songs           |
+| `nplayed`      | int        | count of played songs            |
 | `song_pos`     | double     | current playback position (s)    |
 | `song_dur`     | double     | total song duration (s)          |
 
@@ -65,3 +68,7 @@ SIGINT and SIGTERM are caught by `sig_handler` which calls `cleanup()` then `_ex
 - **LOOP_SINGLE**: replay the same song
 
 Toggle with `m` key. Status line shows `[repeat]` when in LOOP_SINGLE mode.
+
+## Shuffle mode
+
+Toggle with `n` key. When active, `check_child()` picks a random unplayed song via `shuffle_next()` instead of sequential advance. The `played[]` bitset tracks which songs have been heard. When all songs are played (`nplayed >= nsongs`), `shuffle_clear()` flushes the set. Manually playing a song (Enter/Space) also marks it as played. Toggling shuffle on clears the set and marks the current song. Status line and song list show `[shuffle]`.

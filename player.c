@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -22,6 +23,9 @@ static int tmux_mode = 0;
 
 enum { LOOP_ALL, LOOP_SINGLE };
 static int loop_mode = LOOP_ALL;
+static int shuffle = 0;
+static int played[MAX_SONGS];
+static int nplayed = 0;
 
 static const char *songs_dir = SONGS_DIR;
 static char *songs[MAX_SONGS];
@@ -243,7 +247,11 @@ static void draw(void) {
 			reset = "\033[0m";
 		}
 
-		const char *suffix = (idx == playing && loop_mode == LOOP_SINGLE) ? " [repeat]" : "";
+		const char *suffix = "";
+		if (idx == playing) {
+			if (loop_mode == LOOP_SINGLE) suffix = " [repeat]";
+			else if (shuffle) suffix = " [shuffle]";
+		}
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"%s%s%s%s%s\r\n", style, prefix, songs[idx], suffix, reset);
 
@@ -256,7 +264,9 @@ static void draw(void) {
 	/* move to bottom rows for status */
 	if (playing >= 0) {
 		const char *state = paused ? "[paused]" : "[playing]";
-		const char *lmode = (loop_mode == LOOP_SINGLE) ? "[repeat]" : "";
+		const char *lmode = "";
+		if (loop_mode == LOOP_SINGLE) lmode = "[repeat]";
+		else if (shuffle) lmode = "[shuffle]";
 		int pm = (int)song_pos / 60, ps = (int)song_pos % 60;
 		int dm = (int)song_dur / 60, ds = (int)song_dur % 60;
 
@@ -286,7 +296,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  m:loop  esc:stop  q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  m:loop  n:shuffle  esc:stop  q:quit\033[0m",
 			rows);
 	}
 
@@ -315,6 +325,38 @@ static void play_song(int idx) {
 	}
 }
 
+static void shuffle_clear(void) {
+	memset(played, 0, sizeof(played));
+	nplayed = 0;
+}
+
+static void shuffle_mark(int idx) {
+	if (!played[idx]) {
+		played[idx] = 1;
+		nplayed++;
+	}
+	if (nplayed >= nsongs)
+		shuffle_clear();
+}
+
+static int shuffle_next(void) {
+	int avail = nsongs - nplayed;
+	if (avail <= 0) {
+		shuffle_clear();
+		avail = nsongs;
+	}
+	int pick = rand() % avail;
+	int count = 0;
+	for (int i = 0; i < nsongs; i++) {
+		if (!played[i]) {
+			if (count == pick)
+				return i;
+			count++;
+		}
+	}
+	return 0;
+}
+
 static void check_child(void) {
 	if (mpv_pid > 0) {
 		int status;
@@ -326,14 +368,19 @@ static void check_child(void) {
 			playing = -1;
 			song_pos = 0;
 			song_dur = 0;
-			/* auto-play based on loop mode */
+			/* auto-play based on mode */
 			if (prev >= 0) {
-				if (loop_mode == LOOP_SINGLE)
+				if (loop_mode == LOOP_SINGLE) {
 					play_song(prev);
-				else if (prev + 1 < nsongs)
+				} else if (shuffle) {
+					int next = shuffle_next();
+					shuffle_mark(next);
+					play_song(next);
+				} else if (prev + 1 < nsongs) {
 					play_song(prev + 1);
-				else
+				} else {
 					play_song(0); /* wrap to top */
+				}
 			}
 		}
 	}
@@ -348,6 +395,7 @@ int main(int argc, char **argv) {
 	if (env_dir)
 		songs_dir = env_dir;
 
+	srand(time(NULL));
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
 	signal(SIGPIPE, SIG_IGN);
@@ -390,6 +438,7 @@ int main(int argc, char **argv) {
 		case '\r':
 		case '\n':
 			play_song(cursor);
+			if (shuffle) shuffle_mark(cursor);
 			break;
 		case ' ':
 			if (mpv_pid > 0) {
@@ -397,6 +446,7 @@ int main(int argc, char **argv) {
 				paused = !paused;
 			} else {
 				play_song(cursor);
+				if (shuffle) shuffle_mark(cursor);
 			}
 			break;
 		case 'h':
@@ -418,6 +468,13 @@ int main(int argc, char **argv) {
 			break;
 		case 'm':
 			loop_mode = (loop_mode == LOOP_ALL) ? LOOP_SINGLE : LOOP_ALL;
+			break;
+		case 'n':
+			shuffle = !shuffle;
+			if (shuffle) {
+				shuffle_clear();
+				if (playing >= 0) shuffle_mark(playing);
+			}
 			break;
 		case 0x1b: /* ESC */
 			kill_mpv();

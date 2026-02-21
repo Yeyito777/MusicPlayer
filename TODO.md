@@ -5,7 +5,7 @@
 - [x] Volume control (- / +)
 - [x] Auto-play next song when current one ends
 - [x] Loop modes (single / all)
-- [ ] Shuffle mode
+- [x] Shuffle mode
 
 ## Later
 - [ ] Search / filter songs by typing /
