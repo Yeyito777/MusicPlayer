@@ -31,10 +31,10 @@ The original termios is saved and restored via `atexit()`, `cleanup()`, and the 
 
 Each frame:
 1. `\033[2J\033[H` — clear screen + cursor home
-2. Write header, song list, status bar into a `buf[4096]`
+2. Write header, song list, status bar into a `buf[8192]`
 3. Single `write()` call to minimize flicker
 
-The buffer is flushed early if it fills past 3840 bytes (4096 - 256 margin) to handle very long song lists.
+The buffer is flushed early if it fills past 7936 bytes (8192 - 256 margin) to handle very long song lists. Uses absolute cursor positioning (`\033[row;colH`) throughout for sidebar support.
 
 ## Terminal size
 
@@ -56,3 +56,8 @@ The buffer is flushed early if it fills past 3840 bytes (4096 - 256 margin) to h
 | `\033[?1049l`     | leave alt screen buffer  |
 | `\033[?25h`       | show cursor              |
 | `\033[?25l`       | hide cursor              |
+| `\033[{r};{c}H`  | cursor to row r, col c   |
+
+## CSI sequence parsing
+
+Ctrl+M arrives as the kitty keyboard protocol sequence `\033[109;5u`. After reading `\033`, the main loop polls for additional bytes (20ms timeout) and accumulates until a CSI final byte (`>= 0x40`). The `[` introducer is skipped in the terminator check (`slen > 1`) since `[` (0x5b) is itself >= 0x40. If the result matches `[109;5u`, it's Ctrl+M. Otherwise the consumed bytes are discarded and `\033` is treated as bare Escape.

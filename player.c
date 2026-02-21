@@ -35,6 +35,10 @@ static int cursor = 0;
 static int playing = -1;
 static double song_pos = 0;
 static double song_dur = 0;
+static int volume = 100;
+
+#define CONFIG_FILE "config.conf"
+static const char *config_file = CONFIG_FILE;
 
 static int searching = 0;
 static char search_buf[256];
@@ -232,6 +236,26 @@ static void scan_playlists(void) {
 	free(namelist);
 }
 
+static void load_config(void) {
+	FILE *f = fopen(config_file, "r");
+	if (!f) return;
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		int v;
+		if (sscanf(line, "volume=%d", &v) == 1) {
+			if (v >= 0 && v <= 100) volume = v;
+		}
+	}
+	fclose(f);
+}
+
+static void save_config(void) {
+	FILE *f = fopen(config_file, "w");
+	if (!f) return;
+	fprintf(f, "volume=%d\n", volume);
+	fclose(f);
+}
+
 static void load_playlist(int idx) {
 	char path[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/%s.playlist", playlists_dir, playlists[idx]);
@@ -390,13 +414,25 @@ static void draw(void) {
 		}
 	}
 
-	/* main header */
+	/* main header + volume indicator */
 	if (playlist_active >= 0) {
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"\033[1;1H\033[1m  MusicPlayer [%s]\033[0m", playlists[playlist_active]);
 	} else {
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"\033[1;1H\033[1m  MusicPlayer\033[0m");
+	}
+	{
+		int vbars = volume / 5;
+		len += snprintf(buf + len, sizeof(buf) - len, " | [");
+		if (vbars > 0)
+			len += snprintf(buf + len, sizeof(buf) - len, "\033[32m");
+		for (int i = 0; i < 20; i++) {
+			if (i == vbars)
+				len += snprintf(buf + len, sizeof(buf) - len, "\033[2m");
+			buf[len++] = '|';
+		}
+		len += snprintf(buf + len, sizeof(buf) - len, "\033[0m]");
 	}
 
 	/* main separator */
@@ -500,6 +536,9 @@ static void play_song(int idx) {
 	char path[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/%s", songs_dir, songs[idx]);
 
+	char vol_arg[32];
+	snprintf(vol_arg, sizeof(vol_arg), "--volume=%d", volume);
+
 	pid_t pid = fork();
 	if (pid == 0) {
 		/* detach from terminal completely */
@@ -507,7 +546,7 @@ static void play_song(int idx) {
 		freopen("/dev/null", "w", stdout);
 		freopen("/dev/null", "w", stderr);
 		execlp("mpv", "mpv", "--no-video", "--no-terminal",
-			"--input-ipc-server=" MPV_SOCKET, path, NULL);
+			"--input-ipc-server=" MPV_SOCKET, vol_arg, path, NULL);
 		_exit(1);
 	} else if (pid > 0) {
 		mpv_pid = pid;
@@ -599,6 +638,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	scan_playlists();
+	load_config();
 
 	term_raw();
 	draw();
@@ -741,12 +781,18 @@ int main(int argc, char **argv) {
 			break;
 		case '=':
 		case '+':
+			volume += 5;
+			if (volume > 100) volume = 100;
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"add\",\"volume\",5]}\n");
+			save_config();
 			break;
 		case '-':
+			volume -= 5;
+			if (volume < 0) volume = 0;
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"add\",\"volume\",-5]}\n");
+			save_config();
 			break;
 		case 'm':
 			if (loop_mode == LOOP_SINGLE) {

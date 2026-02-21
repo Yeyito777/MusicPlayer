@@ -10,6 +10,8 @@ The binary supports a `--tmux` flag (parsed in `main()`, stored in `static int t
 
 `tests/songs/` contains empty fixture files: `alpha.mp3`, `beta.flac`, `gamma.ogg`. The binary is pointed at this directory via the `SONGS_DIR` environment variable. `scandir()` picks them up as regular files regardless of content — only filenames matter for TUI tests.
 
+`tests/playlists/` contains `test.playlist` (alpha.mp3 and gamma.ogg). Pointed at via `PLAYLISTS_DIR=playlists`.
+
 ## Harness API
 
 All functions in `tests/run.sh`:
@@ -17,6 +19,7 @@ All functions in `tests/run.sh`:
 ```bash
 start              # Kill old session, spawn fresh tmux 80x24 running the binary
 send 'j'           # tmux send-keys (raw key names: j, k, g, G, q, Enter)
+send_seq $'\033..' # Send raw escape sequence via tmux paste-buffer (for CSI sequences)
 capture            # tmux capture-pane -p → stdout
 wait_ms 200        # sleep 0.200
 assert_contains    "label" "needle"       # PASS if capture contains needle
@@ -29,7 +32,7 @@ cleanup            # tmux kill-session (runs on EXIT trap)
 
 ```bash
 tmux new-session -d -s "$SESSION" -x 80 -y 24 \
-    "cd $DIR && SONGS_DIR=songs $BINARY --tmux; echo __EXITED__; sleep 10"
+    "cd $DIR && SONGS_DIR=songs PLAYLISTS_DIR=playlists $BINARY --tmux; echo __EXITED__; sleep 10"
 ```
 
 The `echo __EXITED__; sleep 10` suffix keeps the tmux session alive after the binary exits so `assert_session_dead` can capture the sentinel string instead of racing against session teardown.

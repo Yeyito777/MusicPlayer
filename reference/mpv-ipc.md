@@ -20,7 +20,7 @@ Connect to the socket as `SOCK_STREAM`, send newline-terminated JSON:
 {"command":["cycle","pause"]}\n
 ```
 
-The `mpv_cmd()` function opens a fresh connection per command (connect, write, close). This is simple and avoids managing a persistent fd — the overhead is negligible for human-speed key presses.
+`mpv_connect()` establishes a persistent connection (stored in `mpv_fd`). `mpv_cmd()` writes commands over this fd, reconnecting if needed. `mpv_disconnect()` closes it on stop/error.
 
 ## Command reference
 
@@ -31,14 +31,18 @@ Commands currently used:
 | `["seek", "5"]`                       | seek forward 5s      |
 | `["seek", "-5"]`                      | seek back 5s         |
 | `["cycle", "pause"]`                  | toggle pause/resume  |
+| `["add", "volume", 5]`               | volume up 5%         |
+| `["add", "volume", -5]`              | volume down 5%       |
 | `["get_property", "time-pos"]`        | current position (s) |
 | `["get_property", "duration"]`        | total duration (s)   |
 
 ## Property queries
 
-`mpv_get_double()` sends a `get_property` command, reads the JSON response with `poll()` + `read()` (100ms timeout), and parses `"data":123.456` with `strstr` + `strtod`. Returns -1 on failure.
+`update_position()` sends both `time-pos` and `duration` queries in one batch, reads responses with `poll()` + `read()` (50ms timeout per attempt, up to 20 retries), and parses `"data":123.456` via `parse_response()` using `strstr` + `strtod`. Runs each main loop iteration when playing and not paused.
 
-`update_position()` queries `time-pos` and `duration` on each main loop iteration (when playing and not paused), storing results in `song_pos` and `song_dur`.
+## Volume
+
+Volume is tracked as an app-level global (`volume`, 0-100, steps of 5). On `play_song()`, mpv is launched with `--volume=XX`. The `+`/`-` keys adjust the global and send an IPC `add volume` command to the running instance. Volume persists to `config.conf` (see below).
 
 ## Extending
 
