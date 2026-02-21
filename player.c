@@ -17,7 +17,9 @@
 static struct termios orig_termios;
 static pid_t mpv_pid = -1;
 static int paused = 0;
+static int tmux_mode = 0;
 
+static const char *songs_dir = SONGS_DIR;
 static char *songs[MAX_SONGS];
 static int nsongs = 0;
 static int cursor = 0;
@@ -29,8 +31,8 @@ static void die(const char *msg) {
 }
 
 static void term_restore(void) {
-	/* leave alt buffer, show cursor, restore termios */
-	write(STDOUT_FILENO, "\033[?1049l\033[?25h", 14);
+	if (!tmux_mode)
+		write(STDOUT_FILENO, "\033[?1049l\033[?25h", 14);
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
@@ -78,15 +80,15 @@ static void term_raw(void) {
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
 		die("tcsetattr");
 
-	/* enter alt buffer, hide cursor */
-	write(STDOUT_FILENO, "\033[?1049h\033[?25l", 14);
+	if (!tmux_mode)
+		write(STDOUT_FILENO, "\033[?1049h\033[?25l", 14);
 }
 
 static int scan_songs(void) {
 	struct dirent **namelist;
-	int n = scandir(SONGS_DIR, &namelist, NULL, alphasort);
+	int n = scandir(songs_dir, &namelist, NULL, alphasort);
 	if (n < 0)
-		die("scandir: " SONGS_DIR);
+		die("scandir");
 
 	for (int i = 0; i < n; i++) {
 		if (namelist[i]->d_name[0] != '.' && namelist[i]->d_type == DT_REG) {
@@ -187,7 +189,7 @@ static void play_song(int idx) {
 	kill_mpv();
 
 	char path[PATH_MAX];
-	snprintf(path, sizeof(path), SONGS_DIR "/%s", songs[idx]);
+	snprintf(path, sizeof(path), "%s/%s", songs_dir, songs[idx]);
 
 	pid_t pid = fork();
 	if (pid == 0) {
@@ -216,12 +218,20 @@ static void check_child(void) {
 	}
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+	for (int i = 1; i < argc; i++)
+		if (strcmp(argv[i], "--tmux") == 0)
+			tmux_mode = 1;
+
+	const char *env_dir = getenv("SONGS_DIR");
+	if (env_dir)
+		songs_dir = env_dir;
+
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
 
 	if (scan_songs() == 0) {
-		fprintf(stderr, "No songs found in %s/\n", SONGS_DIR);
+		fprintf(stderr, "No songs found in %s/\n", songs_dir);
 		return 1;
 	}
 
