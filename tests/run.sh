@@ -156,7 +156,9 @@ assert_session_dead "q exits cleanly"
 echo ""
 echo "Help text"
 start
-assert_contains "shows help with seek hint" "h/l:seek"
+assert_contains "shows help text" "spc:play"
+assert_contains "shows help with seek" "h/l:seek"
+assert_contains "shows esc for stop" "esc:stop"
 
 echo ""
 echo "Progress bar (requires mpv)"
@@ -181,7 +183,7 @@ with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
 	assert_contains "shows playing state" "[playing]"
 	assert_contains "progress bar has time" "0:0"
 	# Stop and verify progress bar goes away
-	send s
+	send Escape
 	wait_ms 400
 	assert_not_contains "stopped clears progress bar" "[playing]"
 	rm -f "$DIR/songs/test-tone.wav"

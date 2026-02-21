@@ -281,7 +281,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav  enter:play  h/l:seek  p:pause  s:stop  q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav  enter/spc:play  h/l:seek  spc:pause  esc:stop  q:quit\033[0m",
 			rows);
 	}
 
@@ -372,10 +372,12 @@ int main(int argc, char **argv) {
 		case '\n':
 			play_song(cursor);
 			break;
-		case 'p':
+		case ' ':
 			if (mpv_pid > 0) {
 				mpv_cmd("{\"command\":[\"cycle\",\"pause\"]}\n");
 				paused = !paused;
+			} else {
+				play_song(cursor);
 			}
 			break;
 		case 'h':
@@ -386,7 +388,7 @@ int main(int argc, char **argv) {
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"seek\",\"5\"]}\n");
 			break;
-		case 's':
+		case 0x1b: /* ESC */
 			kill_mpv();
 			break;
 		case 'g':

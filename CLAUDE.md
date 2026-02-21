@@ -26,11 +26,12 @@ make clean          # remove binary
 
 Run the full suite with `make test`. Tests use a tmux-based harness that drives the real binary.
 
-After implementing a feature you MUST:
+After implementing a feature or making any change you MUST:
 1. Write E2E tests for any new TUI behavior in `tests/run.sh`
-2. Run `make test` and verify all tests pass before considering the work done
+2. Run `make clean && make && make install && make test` — clean build, install the binary to ~/.local/bin/, and run all tests
+3. Verify all tests pass before considering the work done
 
-Do not hand features to the user to test. You have full ability to test everything yourself through the tmux harness — use it.
+This is non-negotiable. Every change ends with a clean build + install + passing tests. Do not hand features to the user to test. You have full ability to test everything yourself through the tmux harness — use it.
 
 ### E2E tests (tmux harness)
 
