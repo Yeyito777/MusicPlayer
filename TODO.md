@@ -1,8 +1,8 @@
 # Roadmap
 
 ## Next
-- [ ] Progress bar showing current position / duration
-- [ ] Volume control (- / +)
+- [x] Progress bar showing current position / duration
+- [x] Volume control (- / +)
 - [ ] Auto-play next song when current one ends
 - [ ] Shuffle mode
 - [ ] Loop modes (single / all / off)

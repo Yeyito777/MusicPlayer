@@ -44,7 +44,7 @@ assert_contains() {
 	local label="$1" needle="$2"
 	local screen
 	screen="$(capture)"
-	if echo "$screen" | grep -qF "$needle"; then
+	if echo "$screen" | grep -qF -- "$needle"; then
 		printf "  \033[32mPASS\033[0m %s\n" "$label"
 		PASS=$((PASS + 1))
 	else
@@ -58,7 +58,7 @@ assert_not_contains() {
 	local label="$1" needle="$2"
 	local screen
 	screen="$(capture)"
-	if echo "$screen" | grep -qF "$needle"; then
+	if echo "$screen" | grep -qF -- "$needle"; then
 		printf "  \033[31mFAIL\033[0m %s — should NOT contain: %s\n" "$label" "$needle"
 		printf "  --- screen ---\n%s\n  --- end ---\n" "$screen"
 		FAIL=$((FAIL + 1))
@@ -156,9 +156,10 @@ assert_session_dead "q exits cleanly"
 echo ""
 echo "Help text"
 start
-assert_contains "shows help text" "spc:play"
-assert_contains "shows help with seek" "h/l:seek"
-assert_contains "shows esc for stop" "esc:stop"
+assert_contains "shows play/pause hint" "spc:play/pause"
+assert_contains "shows seek hint" "h/l:seek"
+assert_contains "shows volume hint" "-/+:vol"
+assert_contains "shows stop hint" "esc:stop"
 
 echo ""
 echo "Progress bar (requires mpv)"

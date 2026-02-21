@@ -281,7 +281,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav  enter/spc:play  h/l:seek  spc:pause  esc:stop  q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  esc:stop  q:quit\033[0m",
 			rows);
 	}
 
@@ -387,6 +387,15 @@ int main(int argc, char **argv) {
 		case 'l':
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"seek\",\"5\"]}\n");
+			break;
+		case '=':
+		case '+':
+			if (mpv_pid > 0)
+				mpv_cmd("{\"command\":[\"add\",\"volume\",5]}\n");
+			break;
+		case '-':
+			if (mpv_pid > 0)
+				mpv_cmd("{\"command\":[\"add\",\"volume\",-5]}\n");
 			break;
 		case 0x1b: /* ESC */
 			kill_mpv();
