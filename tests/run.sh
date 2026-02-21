@@ -231,11 +231,13 @@ with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
 	# Toggle to single loop mode
 	send m
 	wait_ms 300
-	assert_contains "m toggles repeat indicator" "[repeat]"
+	assert_contains "m toggles repeat in status" "[repeat]"
+	assert_contains "m shows repeat next to song" "test-tone.wav [repeat]"
 	# Toggle back to all
 	send m
 	wait_ms 300
 	assert_not_contains "m toggles back to loop all" "[repeat]"
+	assert_not_contains "repeat tag removed from song" "test-tone.wav [repeat]"
 	send Escape
 	wait_ms 300
 	rm -f "$DIR/songs/test-tone.wav"

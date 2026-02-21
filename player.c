@@ -243,8 +243,9 @@ static void draw(void) {
 			reset = "\033[0m";
 		}
 
+		const char *suffix = (idx == playing && loop_mode == LOOP_SINGLE) ? " [repeat]" : "";
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"%s%s%s%s\r\n", style, prefix, songs[idx], reset);
+			"%s%s%s%s%s\r\n", style, prefix, songs[idx], suffix, reset);
 
 		if (len >= (int)sizeof(buf) - 256) {
 			write(STDOUT_FILENO, buf, len);
