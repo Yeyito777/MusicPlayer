@@ -20,6 +20,9 @@ static pid_t mpv_pid = -1;
 static int paused = 0;
 static int tmux_mode = 0;
 
+enum { LOOP_ALL, LOOP_SINGLE };
+static int loop_mode = LOOP_ALL;
+
 static const char *songs_dir = SONGS_DIR;
 static char *songs[MAX_SONGS];
 static int nsongs = 0;
@@ -252,12 +255,13 @@ static void draw(void) {
 	/* move to bottom rows for status */
 	if (playing >= 0) {
 		const char *state = paused ? "[paused]" : "[playing]";
+		const char *lmode = (loop_mode == LOOP_SINGLE) ? "[repeat]" : "";
 		int pm = (int)song_pos / 60, ps = (int)song_pos % 60;
 		int dm = (int)song_dur / 60, ds = (int)song_dur % 60;
 
 		/* song name + times on row rows-1 */
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[32m%s %s\033[0m", rows - 1, state, songs[playing]);
+			"\033[%d;1H\033[32m%s%s %s\033[0m", rows - 1, state, lmode, songs[playing]);
 
 		/* progress bar on bottom row */
 		int bar_max = cols - 14; /* "mm:ss [===] mm:ss" */
@@ -281,7 +285,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  esc:stop  q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  m:loop  esc:stop  q:quit\033[0m",
 			rows);
 	}
 
@@ -296,7 +300,8 @@ static void play_song(int idx) {
 
 	pid_t pid = fork();
 	if (pid == 0) {
-		/* redirect stdout/stderr to /dev/null */
+		/* detach from terminal completely */
+		freopen("/dev/null", "r", stdin);
 		freopen("/dev/null", "w", stdout);
 		freopen("/dev/null", "w", stderr);
 		execlp("mpv", "mpv", "--no-video", "--no-terminal",
@@ -320,9 +325,15 @@ static void check_child(void) {
 			playing = -1;
 			song_pos = 0;
 			song_dur = 0;
-			/* auto-play next song */
-			if (prev >= 0 && prev + 1 < nsongs)
-				play_song(prev + 1);
+			/* auto-play based on loop mode */
+			if (prev >= 0) {
+				if (loop_mode == LOOP_SINGLE)
+					play_song(prev);
+				else if (prev + 1 < nsongs)
+					play_song(prev + 1);
+				else
+					play_song(0); /* wrap to top */
+			}
 		}
 	}
 }
@@ -338,6 +349,7 @@ int main(int argc, char **argv) {
 
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
+	signal(SIGPIPE, SIG_IGN);
 
 	if (scan_songs() == 0) {
 		fprintf(stderr, "No songs found in %s/\n", songs_dir);
@@ -402,6 +414,9 @@ int main(int argc, char **argv) {
 		case '-':
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"add\",\"volume\",-5]}\n");
+			break;
+		case 'm':
+			loop_mode = (loop_mode == LOOP_ALL) ? LOOP_SINGLE : LOOP_ALL;
 			break;
 		case 0x1b: /* ESC */
 			kill_mpv();

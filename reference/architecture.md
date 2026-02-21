@@ -39,6 +39,7 @@ All state is file-scope static:
 | `nsongs`       | int        | count of loaded songs            |
 | `cursor`       | int        | highlighted list index           |
 | `playing`      | int        | index of playing song, -1 if none|
+| `loop_mode`    | int        | LOOP_ALL (0) or LOOP_SINGLE (1)  |
 | `song_pos`     | double     | current playback position (s)    |
 | `song_dur`     | double     | total song duration (s)          |
 
@@ -55,4 +56,12 @@ The `poll()` timeout means the UI refreshes ~4 times/sec even without keypresses
 
 ## Signal handling
 
-SIGINT and SIGTERM are caught by `sig_handler` which calls `cleanup()` then `_exit(0)`. This ensures the terminal is always restored even on Ctrl+C.
+SIGINT and SIGTERM are caught by `sig_handler` which calls `cleanup()` then `_exit(0)`. This ensures the terminal is always restored even on Ctrl+C. SIGPIPE is ignored (SIG_IGN) to prevent process termination when writing to a broken mpv socket during song transitions.
+
+## Loop modes
+
+`check_child()` handles auto-advance when mpv exits:
+- **LOOP_ALL** (default): play next song, wrap to index 0 at end of playlist
+- **LOOP_SINGLE**: replay the same song
+
+Toggle with `m` key. Status line shows `[repeat]` when in LOOP_SINGLE mode.

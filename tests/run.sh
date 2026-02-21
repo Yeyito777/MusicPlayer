@@ -159,6 +159,7 @@ start
 assert_contains "shows play/pause hint" "spc:play/pause"
 assert_contains "shows seek hint" "h/l:seek"
 assert_contains "shows volume hint" "-/+:vol"
+assert_contains "shows loop hint" "m:loop"
 assert_contains "shows stop hint" "esc:stop"
 
 echo ""
@@ -208,11 +209,64 @@ for name, frames in [('aaa-first.wav', 44100), ('aab-second.wav', 132300)]:
 	# Should now be playing aab-second.wav
 	assert_contains "auto-play started next song" "aab-second.wav"
 	rm -f "$DIR/songs/aaa-first.wav" "$DIR/songs/aab-second.wav"
+
+	echo ""
+	echo "Loop modes (requires mpv)"
+	python3 -c "
+import wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 88200)
+"
+	start
+	# Navigate to test-tone.wav and play it
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 1
+	# Toggle to single loop mode
+	send m
+	wait_ms 300
+	assert_contains "m toggles repeat indicator" "[repeat]"
+	# Toggle back to all
+	send m
+	wait_ms 300
+	assert_not_contains "m toggles back to loop all" "[repeat]"
+	send Escape
+	wait_ms 300
+	rm -f "$DIR/songs/test-tone.wav"
+
+	echo ""
+	echo "Playlist wrap (requires mpv)"
+	python3 -c "
+import wave
+for name, frames in [('aaa-wrap-target.wav', 132300), ('zzz-wrap-source.wav', 44100)]:
+    with wave.open('$DIR/songs/' + name, 'w') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b'\x00\x00' * frames)
+"
+	start
+	# Navigate to last song (zzz-wrap-source.wav) and play it
+	send G
+	wait_ms 200
+	send Enter
+	sleep 3
+	# Should have wrapped to aaa-wrap-target.wav
+	assert_contains "playlist wraps to first song" "aaa-wrap-target.wav"
+	rm -f "$DIR/songs/aaa-wrap-target.wav" "$DIR/songs/zzz-wrap-source.wav"
 else
 	skip "progress bar shows during playback (no mpv)"
 	skip "progress bar has time display (no mpv)"
 	skip "stop clears progress bar (no mpv)"
 	skip "auto-play next song (no mpv)"
+	skip "loop mode toggle (no mpv)"
+	skip "playlist wraps to first song (no mpv)"
 fi
 
 # --- summary ---

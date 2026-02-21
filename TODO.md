@@ -4,7 +4,7 @@
 - [x] Progress bar showing current position / duration
 - [x] Volume control (- / +)
 - [x] Auto-play next song when current one ends
-- [ ] Loop modes (single / all / off)
+- [x] Loop modes (single / all)
 - [ ] Shuffle mode
 
 ## Later
