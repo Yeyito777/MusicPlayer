@@ -44,6 +44,20 @@ static int filtered[MAX_SONGS];
 static int nfiltered = 0;
 static int filter_active = 0;
 
+#define MAX_PLAYLISTS 64
+#define PLAYLISTS_DIR "playlists"
+#define SIDEBAR_WIDTH 24
+
+static const char *playlists_dir = PLAYLISTS_DIR;
+static char *playlists[MAX_PLAYLISTS];
+static int nplaylists = 0;
+
+static int playlist_menu = 0;
+static int playlist_cursor = 0;
+static int playlist_active = -1;
+static int playlist_songs[MAX_SONGS];
+static int nplaylist_songs = 0;
+
 static void die(const char *msg) {
 	perror(msg);
 	exit(1);
@@ -196,6 +210,66 @@ static int scan_songs(void) {
 	return nsongs;
 }
 
+static void scan_playlists(void) {
+	struct dirent **namelist;
+	int n = scandir(playlists_dir, &namelist, NULL, alphasort);
+	if (n < 0) return; /* no playlists dir is fine */
+
+	for (int i = 0; i < n; i++) {
+		const char *name = namelist[i]->d_name;
+		const char *ext = strstr(name, ".playlist");
+		if (ext && ext[9] == '\0' && ext != name) {
+			if (nplaylists < MAX_PLAYLISTS) {
+				int baselen = ext - name;
+				playlists[nplaylists] = malloc(baselen + 1);
+				memcpy(playlists[nplaylists], name, baselen);
+				playlists[nplaylists][baselen] = '\0';
+				nplaylists++;
+			}
+		}
+		free(namelist[i]);
+	}
+	free(namelist);
+}
+
+static void load_playlist(int idx) {
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/%s.playlist", playlists_dir, playlists[idx]);
+	FILE *f = fopen(path, "r");
+	if (!f) return;
+
+	nplaylist_songs = 0;
+	char line[1024];
+	while (fgets(line, sizeof(line), f)) {
+		/* strip newline */
+		int len = strlen(line);
+		while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+			line[--len] = '\0';
+		if (len == 0) continue;
+		for (int i = 0; i < nsongs; i++) {
+			if (strcmp(songs[i], line) == 0) {
+				if (nplaylist_songs < MAX_SONGS)
+					playlist_songs[nplaylist_songs++] = i;
+				break;
+			}
+		}
+	}
+	fclose(f);
+}
+
+static int find_in_display(int song_idx) {
+	if (filter_active) {
+		for (int i = 0; i < nfiltered; i++)
+			if (filtered[i] == song_idx) return i;
+	} else if (playlist_active >= 0) {
+		for (int i = 0; i < nplaylist_songs; i++)
+			if (playlist_songs[i] == song_idx) return i;
+	} else {
+		if (song_idx >= 0 && song_idx < nsongs) return song_idx;
+	}
+	return 0;
+}
+
 static int term_rows(void) {
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1)
@@ -211,11 +285,15 @@ static int term_cols(void) {
 }
 
 static int song_at(int pos) {
-	return filter_active ? filtered[pos] : pos;
+	if (filter_active) return filtered[pos];
+	if (playlist_active >= 0) return playlist_songs[pos];
+	return pos;
 }
 
 static int display_len(void) {
-	return filter_active ? nfiltered : nsongs;
+	if (filter_active) return nfiltered;
+	if (playlist_active >= 0) return nplaylist_songs;
+	return nsongs;
 }
 
 static void apply_filter(void) {
@@ -223,7 +301,7 @@ static void apply_filter(void) {
 
 	if (search_len == 0) {
 		filter_active = 0;
-		cursor = prev_song;
+		cursor = find_in_display(prev_song);
 		return;
 	}
 
@@ -232,9 +310,11 @@ static void apply_filter(void) {
 		return; /* invalid regex, keep previous state */
 
 	nfiltered = 0;
-	for (int i = 0; i < nsongs; i++) {
-		if (regexec(&re, songs[i], 0, NULL, 0) == 0)
-			filtered[nfiltered++] = i;
+	int base_count = (playlist_active >= 0) ? nplaylist_songs : nsongs;
+	for (int i = 0; i < base_count; i++) {
+		int sidx = (playlist_active >= 0) ? playlist_songs[i] : i;
+		if (regexec(&re, songs[sidx], 0, NULL, 0) == 0)
+			filtered[nfiltered++] = sidx;
 	}
 	regfree(&re);
 	filter_active = 1;
@@ -257,18 +337,74 @@ static void draw(void) {
 	/* clear screen, move to top */
 	write(STDOUT_FILENO, "\033[2J\033[H", 7);
 
-	char buf[4096];
+	char buf[8192];
 	int len = 0;
 
-	/* header */
-	len += snprintf(buf + len, sizeof(buf) - len,
-		"\033[1m  MusicPlayer\033[0m\r\n");
-	for (int i = 0; i < cols && len < (int)sizeof(buf) - 1; i++)
-		buf[len++] = '-';
-	buf[len++] = '\r';
-	buf[len++] = '\n';
+	int main_cols = cols;
+	int sb_col = 0; /* sidebar start column (0 = no sidebar) */
 
-	/* scrolling: keep cursor visible */
+	if (playlist_menu) {
+		main_cols = cols - SIDEBAR_WIDTH - 1;
+		sb_col = cols - SIDEBAR_WIDTH + 1;
+
+		/* sidebar header */
+		len += snprintf(buf + len, sizeof(buf) - len,
+			"\033[1;%dH\033[1mPlaylists\033[0m", sb_col);
+
+		/* sidebar separator */
+		len += snprintf(buf + len, sizeof(buf) - len, "\033[2;%dH", sb_col);
+		for (int i = 0; i < SIDEBAR_WIDTH && len < (int)sizeof(buf) - 1; i++)
+			buf[len++] = '-';
+
+		/* sidebar entries */
+		for (int i = 0; i <= nplaylists && i < list_rows; i++) {
+			int row = i + 3;
+			const char *name = (i == 0) ? "[All Songs]" : playlists[i - 1];
+			const char *pfix = (i == playlist_cursor) ? "> " : "  ";
+			const char *st = "";
+			const char *rs = "";
+			int is_active = (i == 0 && playlist_active == -1) ||
+				(i > 0 && playlist_active == i - 1);
+
+			if (i == playlist_cursor && is_active) {
+				st = "\033[1;32m"; rs = "\033[0m";
+			} else if (i == playlist_cursor) {
+				st = "\033[1m"; rs = "\033[0m";
+			} else if (is_active) {
+				st = "\033[32m"; rs = "\033[0m";
+			}
+
+			len += snprintf(buf + len, sizeof(buf) - len,
+				"\033[%d;%dH%s%s%s%s", row, sb_col, st, pfix, name, rs);
+		}
+
+		/* border */
+		int border_col = sb_col - 1;
+		for (int r = 1; r <= rows; r++) {
+			len += snprintf(buf + len, sizeof(buf) - len,
+				"\033[%d;%dH|", r, border_col);
+			if (len >= (int)sizeof(buf) - 256) {
+				write(STDOUT_FILENO, buf, len);
+				len = 0;
+			}
+		}
+	}
+
+	/* main header */
+	if (playlist_active >= 0) {
+		len += snprintf(buf + len, sizeof(buf) - len,
+			"\033[1;1H\033[1m  MusicPlayer [%s]\033[0m", playlists[playlist_active]);
+	} else {
+		len += snprintf(buf + len, sizeof(buf) - len,
+			"\033[1;1H\033[1m  MusicPlayer\033[0m");
+	}
+
+	/* main separator */
+	len += snprintf(buf + len, sizeof(buf) - len, "\033[2;1H");
+	for (int i = 0; i < main_cols && len < (int)sizeof(buf) - 1; i++)
+		buf[len++] = '-';
+
+	/* song list */
 	int count = display_len();
 	int offset = 0;
 	if (count > list_rows) {
@@ -286,14 +422,14 @@ static void draw(void) {
 
 		if (dpos == cursor && sidx == playing) {
 			prefix = "> ";
-			style = "\033[1;32m"; /* bold green */
+			style = "\033[1;32m";
 			reset = "\033[0m";
 		} else if (dpos == cursor) {
 			prefix = "> ";
-			style = "\033[1m"; /* bold */
+			style = "\033[1m";
 			reset = "\033[0m";
 		} else if (sidx == playing) {
-			style = "\033[32m"; /* green */
+			style = "\033[32m";
 			reset = "\033[0m";
 		}
 
@@ -302,8 +438,10 @@ static void draw(void) {
 			if (loop_mode == LOOP_SINGLE) suffix = " [repeat]";
 			else if (shuffle) suffix = " [shuffle]";
 		}
+
+		int row = i + 3;
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"%s%s%s%s%s\r\n", style, prefix, songs[sidx], suffix, reset);
+			"\033[%d;1H%s%s%s%s%s", row, style, prefix, songs[sidx], suffix, reset);
 
 		if (len >= (int)sizeof(buf) - 256) {
 			write(STDOUT_FILENO, buf, len);
@@ -311,7 +449,7 @@ static void draw(void) {
 		}
 	}
 
-	/* move to bottom rows for status */
+	/* status lines at bottom */
 	if (playing >= 0) {
 		const char *state = paused ? "[paused]" : "[playing]";
 		const char *lmode = "";
@@ -320,12 +458,10 @@ static void draw(void) {
 		int pm = (int)song_pos / 60, ps = (int)song_pos % 60;
 		int dm = (int)song_dur / 60, ds = (int)song_dur % 60;
 
-		/* song name + times on row rows-1 */
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"\033[%d;1H\033[32m%s%s %s\033[0m", rows - 1, state, lmode, songs[playing]);
 
-		/* progress bar on bottom row */
-		int bar_max = cols - 14; /* "mm:ss [===] mm:ss" */
+		int bar_max = main_cols - 14;
 		if (bar_max < 4) bar_max = 4;
 		int filled = 0;
 		if (song_dur > 0)
@@ -449,6 +585,9 @@ int main(int argc, char **argv) {
 	const char *env_dir = getenv("SONGS_DIR");
 	if (env_dir)
 		songs_dir = env_dir;
+	const char *env_pdir = getenv("PLAYLISTS_DIR");
+	if (env_pdir)
+		playlists_dir = env_pdir;
 
 	srand(time(NULL));
 	signal(SIGINT, sig_handler);
@@ -459,6 +598,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "No songs found in %s/\n", songs_dir);
 		return 1;
 	}
+	scan_playlists();
 
 	term_raw();
 	draw();
@@ -480,13 +620,37 @@ int main(int argc, char **argv) {
 		if (read(STDIN_FILENO, &c, 1) != 1)
 			break;
 
+		/* CSI sequence detection for Ctrl+M */
+		int ctrl_m = 0;
+		if (c == 0x1b) {
+			char seq[32];
+			int slen = 0;
+			struct pollfd sp = { .fd = STDIN_FILENO, .events = POLLIN };
+			while (slen < 31 && poll(&sp, 1, 20) > 0) {
+				if (read(STDIN_FILENO, &seq[slen], 1) != 1) break;
+				slen++;
+				/* CSI final byte is >= 0x40, but skip '[' introducer */
+				if (slen > 1 && seq[slen-1] >= 0x40) break;
+			}
+			seq[slen] = '\0';
+			if (strcmp(seq, "[109;5u") == 0) ctrl_m = 1;
+		}
+
+		if (ctrl_m) {
+			playlist_menu = !playlist_menu;
+			if (playlist_menu)
+				playlist_cursor = (playlist_active >= 0) ? playlist_active + 1 : 0;
+			draw();
+			continue;
+		}
+
 		if (searching) {
 			if (c == '\r' || c == '\n') {
 				searching = 0;
 			} else if (c == 0x1b) {
 				searching = 0;
 				filter_active = 0;
-				cursor = search_prev_cursor;
+				cursor = find_in_display(search_prev_cursor);
 			} else if (c == 0x7f) {
 				if (search_len > 0) {
 					search_buf[--search_len] = '\0';
@@ -498,6 +662,44 @@ int main(int argc, char **argv) {
 					search_buf[search_len] = '\0';
 					apply_filter();
 				}
+			}
+			draw();
+			continue;
+		}
+
+		if (playlist_menu) {
+			switch (c) {
+			case 'j':
+				if (playlist_cursor < nplaylists) playlist_cursor++;
+				break;
+			case 'k':
+				if (playlist_cursor > 0) playlist_cursor--;
+				break;
+			case 'g':
+				playlist_cursor = 0;
+				break;
+			case 'G':
+				playlist_cursor = nplaylists;
+				break;
+			case '\r':
+			case '\n':
+				if (playlist_cursor == 0) {
+					playlist_active = -1;
+					nplaylist_songs = 0;
+				} else {
+					playlist_active = playlist_cursor - 1;
+					load_playlist(playlist_active);
+				}
+				playlist_menu = 0;
+				searching = 0;
+				search_buf[0] = '\0';
+				search_len = 0;
+				filter_active = 0;
+				cursor = 0;
+				break;
+			case 0x1b:
+				playlist_menu = 0;
+				break;
 			}
 			draw();
 			continue;
@@ -571,7 +773,7 @@ int main(int argc, char **argv) {
 			search_buf[0] = '\0';
 			search_len = 0;
 			filter_active = 0;
-			cursor = search_prev_cursor;
+			cursor = find_in_display(search_prev_cursor);
 			searching = 1;
 			break;
 		case 'g':

@@ -24,12 +24,18 @@ start() {
 	cleanup
 	# Launch in a fixed 80x24 tmux pane with test songs dir
 	tmux new-session -d -s "$SESSION" -x 80 -y 24 \
-		"cd $DIR && SONGS_DIR=songs $BINARY --tmux; echo; echo __EXITED__; sleep 10"
+		"cd $DIR && SONGS_DIR=songs PLAYLISTS_DIR=playlists $BINARY --tmux; echo; echo __EXITED__; sleep 10"
 	sleep 0.4
 }
 
 send() {
 	tmux send-keys -t "$SESSION" "$1"
+}
+
+send_seq() {
+	# Use paste-buffer to send raw bytes atomically (avoids tmux key interpretation)
+	printf '%s' "$1" | tmux load-buffer -b _seq -
+	tmux paste-buffer -t "$SESSION" -b _seq -d
 }
 
 capture() {
@@ -348,6 +354,62 @@ else
 	skip "playlist wraps to first song (no mpv)"
 	skip "shuffle mode toggle (no mpv)"
 fi
+
+echo ""
+echo "Playlist sidebar: toggle"
+start
+send_seq $'\033[109;5u'
+wait_ms 300
+assert_contains "Ctrl+M shows sidebar header" "Playlists"
+assert_contains "sidebar shows All Songs" "[All Songs]"
+assert_contains "sidebar shows test playlist" "test"
+
+echo ""
+echo "Playlist sidebar: select playlist"
+start
+send_seq $'\033[109;5u'
+wait_ms 200
+send j
+wait_ms 200
+send Enter
+wait_ms 300
+assert_contains "playlist filters to alpha" "alpha.mp3"
+assert_contains "playlist filters to gamma" "gamma.ogg"
+assert_not_contains "playlist hides beta" "beta.flac"
+
+echo ""
+echo "Playlist sidebar: restore all songs"
+start
+send_seq $'\033[109;5u'
+wait_ms 200
+send j
+wait_ms 200
+send Enter
+wait_ms 300
+send_seq $'\033[109;5u'
+wait_ms 200
+send g
+wait_ms 200
+send Enter
+wait_ms 300
+assert_contains "all songs restored: alpha" "alpha.mp3"
+assert_contains "all songs restored: beta" "beta.flac"
+assert_contains "all songs restored: gamma" "gamma.ogg"
+
+echo ""
+echo "Playlist sidebar: search within playlist"
+start
+send_seq $'\033[109;5u'
+wait_ms 200
+send j
+wait_ms 200
+send Enter
+wait_ms 300
+send /
+send alpha
+wait_ms 300
+assert_contains "search within playlist finds alpha" "> alpha.mp3"
+assert_not_contains "search within playlist hides gamma" "gamma.ogg"
 
 # --- summary ---
 

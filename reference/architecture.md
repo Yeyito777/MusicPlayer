@@ -21,9 +21,15 @@ main loop (poll with 250ms timeout)
   |
   +-- check_child               waitpid(WNOHANG) reap detection
   |
-  +-- song_at / display_len     display list abstraction for filter
+  +-- song_at / display_len     display list abstraction for filter/playlist
   |
   +-- apply_filter              rebuild filtered[] from regex query
+  |
+  +-- scan_playlists            scandir() on playlists/ for .playlist files
+  |
+  +-- load_playlist             read .playlist file, populate playlist_songs[]
+  |
+  +-- find_in_display           map songs[] index to current display position
 ```
 
 ## Globals
@@ -54,11 +60,19 @@ All state is file-scope static:
 | `filtered[]`   | int[1024]  | songs[] indices matching filter  |
 | `nfiltered`    | int        | count of filtered matches        |
 | `filter_active`| int        | filter applied to display list   |
+| `playlists_dir`| const char*| playlists directory (env overridable) |
+| `playlists[]`  | char*[64]  | playlist names (no .playlist ext)|
+| `nplaylists`   | int        | count of loaded playlists        |
+| `playlist_menu`| int        | sidebar open/closed              |
+| `playlist_cursor`| int      | cursor in sidebar (0=[All Songs])|
+| `playlist_active`| int      | active playlist index, -1=none   |
+| `playlist_songs[]`| int[1024]| songs[] indices for active playlist |
+| `nplaylist_songs`| int      | count of songs in active playlist|
 
 ## Lifecycle
 
-1. Parse `--tmux` flag and `SONGS_DIR` env var
-2. `scan_songs()` — populate song list
+1. Parse `--tmux` flag, `SONGS_DIR` and `PLAYLISTS_DIR` env vars
+2. `scan_songs()` — populate song list; `scan_playlists()` — load playlist names
 3. `term_raw()` — enter alt buffer, raw mode, register atexit
 4. `draw()` — initial render
 5. Main loop: `poll()` 250ms → `check_child()` → `update_position()` → handle key (if any) → `draw()`
@@ -86,4 +100,12 @@ Toggle with `n` key. When active, `check_child()` picks a random unplayed song v
 
 Neovim-style filter: `/` or `?` enters search input mode, typing prunes the song list in real-time using POSIX extended regex (`REG_EXTENDED | REG_ICASE`). Enter exits input mode but keeps the filter active; Escape exits and clears the filter. To clear an active filter: press `/` then Enter (empty query = all songs).
 
-`cursor` is an index into the display list, abstracted by `song_at()` (maps display position to `songs[]` index) and `display_len()` (returns `nfiltered` or `nsongs`). `apply_filter()` rebuilds `filtered[]` on each keystroke; invalid regex is a no-op. Auto-play (`check_child`) always uses the full `songs[]` list regardless of filter state.
+`cursor` is an index into the display list, abstracted by `song_at()` (maps display position to `songs[]` index) and `display_len()` (returns `nfiltered`, `nplaylist_songs`, or `nsongs`). `apply_filter()` rebuilds `filtered[]` on each keystroke, iterating over `playlist_songs[]` when a playlist is active; invalid regex is a no-op. Auto-play (`check_child`) always uses the full `songs[]` list regardless of filter/playlist state.
+
+## Playlists / Sidebar
+
+Playlists are `.playlist` files in the `playlists/` directory (overridable via `PLAYLISTS_DIR` env var). Each file contains song filenames line-by-line. `scan_playlists()` runs at startup after `scan_songs()`.
+
+Ctrl+M (`\033[109;5u` CSI sequence from st) toggles a right-side sidebar. The sidebar shows "[All Songs]" followed by playlist names. j/k/g/G navigate, Enter selects, Escape closes without changing. Selecting a playlist populates `playlist_songs[]` via `load_playlist()` and filters the main song list. Search with `/` operates within the active playlist.
+
+The CSI sequence is detected by reading the initial `\033` byte, then polling for additional bytes (20ms timeout) and accumulating until a CSI terminator (`>= 0x40`). This happens before the search input handler so Ctrl+M isn't misinterpreted as Escape.
