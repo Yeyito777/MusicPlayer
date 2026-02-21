@@ -8,7 +8,7 @@
 - [x] Shuffle mode
 
 ## Later
-- [ ] Search / filter songs by typing /
+- [x] Search / filter songs by typing /
 - [ ] Nested directory support (browse subdirectories inside songs/)
 - [ ] Album/artist grouping from ID3 tags
 - [ ] Configurable keybinds via config file

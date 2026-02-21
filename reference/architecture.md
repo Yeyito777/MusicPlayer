@@ -17,11 +17,13 @@ main loop (poll with 250ms timeout)
   |
   +-- mpv_cmd                   fire-and-forget JSON commands over unix socket
   |
-  +-- mpv_get_double            query mpv properties (time-pos, duration)
-  |
   +-- update_position           poll time-pos/duration into song_pos/song_dur
   |
   +-- check_child               waitpid(WNOHANG) reap detection
+  |
+  +-- song_at / display_len     display list abstraction for filter
+  |
+  +-- apply_filter              rebuild filtered[] from regex query
 ```
 
 ## Globals
@@ -45,6 +47,13 @@ All state is file-scope static:
 | `nplayed`      | int        | count of played songs            |
 | `song_pos`     | double     | current playback position (s)    |
 | `song_dur`     | double     | total song duration (s)          |
+| `searching`    | int        | search input mode active         |
+| `search_buf`   | char[256]  | current search/filter query      |
+| `search_len`   | int        | length of search query           |
+| `search_prev_cursor` | int  | songs[] index saved on `/` entry |
+| `filtered[]`   | int[1024]  | songs[] indices matching filter  |
+| `nfiltered`    | int        | count of filtered matches        |
+| `filter_active`| int        | filter applied to display list   |
 
 ## Lifecycle
 
@@ -72,3 +81,9 @@ Toggle with `m` key. Status line shows `[repeat]` when in LOOP_SINGLE mode.
 ## Shuffle mode
 
 Toggle with `n` key. When active, `check_child()` picks a random unplayed song via `shuffle_next()` instead of sequential advance. The `played[]` bitset tracks which songs have been heard. When all songs are played (`nplayed >= nsongs`), `shuffle_clear()` flushes the set. Manually playing a song (Enter/Space) also marks it as played. Toggling shuffle on clears the set and marks the current song. Status line and song list show `[shuffle]`.
+
+## Search / filter
+
+Neovim-style filter: `/` or `?` enters search input mode, typing prunes the song list in real-time using POSIX extended regex (`REG_EXTENDED | REG_ICASE`). Enter exits input mode but keeps the filter active; Escape exits and clears the filter. To clear an active filter: press `/` then Enter (empty query = all songs).
+
+`cursor` is an index into the display list, abstracted by `song_at()` (maps display position to `songs[]` index) and `display_len()` (returns `nfiltered` or `nsongs`). `apply_filter()` rebuilds `filtered[]` on each keystroke; invalid regex is a no-op. Auto-play (`check_child`) always uses the full `songs[]` list regardless of filter state.

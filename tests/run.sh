@@ -154,6 +154,50 @@ send q
 assert_session_dead "q exits cleanly"
 
 echo ""
+echo "Search: filter mode"
+start
+send /
+wait_ms 200
+assert_contains "/ enters search mode" "/"
+send beta
+wait_ms 300
+assert_contains "typing beta shows beta" "> beta.flac"
+assert_not_contains "typing beta hides alpha" "alpha.mp3"
+assert_not_contains "typing beta hides gamma" "gamma.ogg"
+send Enter
+wait_ms 200
+assert_not_contains "Enter hides search bar" "/_"
+assert_contains "filter persists after Enter" "> beta.flac"
+assert_not_contains "alpha still hidden after Enter" "alpha.mp3"
+
+echo ""
+echo "Search: Escape clears filter"
+start
+send /
+send beta
+wait_ms 300
+send Escape
+wait_ms 200
+assert_contains "Escape restores all songs: alpha" "alpha.mp3"
+assert_contains "Escape restores all songs: beta" "beta.flac"
+assert_contains "Escape restores all songs: gamma" "gamma.ogg"
+
+echo ""
+echo "Search: clear filter via / then Enter"
+start
+send /
+send beta
+wait_ms 200
+send Enter
+wait_ms 200
+assert_not_contains "filter active: alpha hidden" "alpha.mp3"
+send /
+send Enter
+wait_ms 200
+assert_contains "/ Enter clears filter: alpha" "alpha.mp3"
+assert_contains "/ Enter clears filter: gamma" "gamma.ogg"
+
+echo ""
 echo "Help text"
 start
 assert_contains "shows play/pause hint" "spc:play/pause"

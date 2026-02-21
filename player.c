@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <regex.h>
 #include <string.h>
 #include <time.h>
 #include <sys/ioctl.h>
@@ -34,6 +35,14 @@ static int cursor = 0;
 static int playing = -1;
 static double song_pos = 0;
 static double song_dur = 0;
+
+static int searching = 0;
+static char search_buf[256];
+static int search_len = 0;
+static int search_prev_cursor = 0;
+static int filtered[MAX_SONGS];
+static int nfiltered = 0;
+static int filter_active = 0;
 
 static void die(const char *msg) {
 	perror(msg);
@@ -201,6 +210,45 @@ static int term_cols(void) {
 	return ws.ws_col;
 }
 
+static int song_at(int pos) {
+	return filter_active ? filtered[pos] : pos;
+}
+
+static int display_len(void) {
+	return filter_active ? nfiltered : nsongs;
+}
+
+static void apply_filter(void) {
+	int prev_song = song_at(cursor);
+
+	if (search_len == 0) {
+		filter_active = 0;
+		cursor = prev_song;
+		return;
+	}
+
+	regex_t re;
+	if (regcomp(&re, search_buf, REG_EXTENDED | REG_ICASE | REG_NOSUB) != 0)
+		return; /* invalid regex, keep previous state */
+
+	nfiltered = 0;
+	for (int i = 0; i < nsongs; i++) {
+		if (regexec(&re, songs[i], 0, NULL, 0) == 0)
+			filtered[nfiltered++] = i;
+	}
+	regfree(&re);
+	filter_active = 1;
+
+	/* try to keep cursor on the same song */
+	cursor = 0;
+	for (int i = 0; i < nfiltered; i++) {
+		if (filtered[i] == prev_song) {
+			cursor = i;
+			break;
+		}
+	}
+}
+
 static void draw(void) {
 	int rows = term_rows();
 	int cols = term_cols();
@@ -221,39 +269,41 @@ static void draw(void) {
 	buf[len++] = '\n';
 
 	/* scrolling: keep cursor visible */
+	int count = display_len();
 	int offset = 0;
-	if (nsongs > list_rows) {
+	if (count > list_rows) {
 		offset = cursor - list_rows / 2;
 		if (offset < 0) offset = 0;
-		if (offset > nsongs - list_rows) offset = nsongs - list_rows;
+		if (offset > count - list_rows) offset = count - list_rows;
 	}
 
-	for (int i = 0; i < list_rows && (i + offset) < nsongs; i++) {
-		int idx = i + offset;
+	for (int i = 0; i < list_rows && (i + offset) < count; i++) {
+		int dpos = i + offset;
+		int sidx = song_at(dpos);
 		const char *prefix = "  ";
 		const char *style = "";
 		const char *reset = "";
 
-		if (idx == cursor && idx == playing) {
+		if (dpos == cursor && sidx == playing) {
 			prefix = "> ";
 			style = "\033[1;32m"; /* bold green */
 			reset = "\033[0m";
-		} else if (idx == cursor) {
+		} else if (dpos == cursor) {
 			prefix = "> ";
 			style = "\033[1m"; /* bold */
 			reset = "\033[0m";
-		} else if (idx == playing) {
+		} else if (sidx == playing) {
 			style = "\033[32m"; /* green */
 			reset = "\033[0m";
 		}
 
 		const char *suffix = "";
-		if (idx == playing) {
+		if (sidx == playing) {
 			if (loop_mode == LOOP_SINGLE) suffix = " [repeat]";
 			else if (shuffle) suffix = " [shuffle]";
 		}
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"%s%s%s%s%s\r\n", style, prefix, songs[idx], suffix, reset);
+			"%s%s%s%s%s\r\n", style, prefix, songs[sidx], suffix, reset);
 
 		if (len >= (int)sizeof(buf) - 256) {
 			write(STDOUT_FILENO, buf, len);
@@ -294,10 +344,15 @@ static void draw(void) {
 		}
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"\033[0m %d:%02d", dm, ds);
-	} else {
+	} else if (!searching) {
 		len += snprintf(buf + len, sizeof(buf) - len,
 			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  m:loop  n:shuffle  esc:stop  q:quit\033[0m",
 			rows);
+	}
+
+	if (searching) {
+		len += snprintf(buf + len, sizeof(buf) - len,
+			"\033[%d;1H\033[2m/%s_\033[0m", rows, search_buf);
 	}
 
 	write(STDOUT_FILENO, buf, len);
@@ -425,28 +480,53 @@ int main(int argc, char **argv) {
 		if (read(STDIN_FILENO, &c, 1) != 1)
 			break;
 
+		if (searching) {
+			if (c == '\r' || c == '\n') {
+				searching = 0;
+			} else if (c == 0x1b) {
+				searching = 0;
+				filter_active = 0;
+				cursor = search_prev_cursor;
+			} else if (c == 0x7f) {
+				if (search_len > 0) {
+					search_buf[--search_len] = '\0';
+					apply_filter();
+				}
+			} else if (c >= 32 && c < 127) {
+				if (search_len < (int)sizeof(search_buf) - 1) {
+					search_buf[search_len++] = c;
+					search_buf[search_len] = '\0';
+					apply_filter();
+				}
+			}
+			draw();
+			continue;
+		}
+
 		switch (c) {
 		case 'q':
 			cleanup();
 			return 0;
 		case 'j':
-			if (cursor < nsongs - 1) cursor++;
+			if (cursor < display_len() - 1) cursor++;
 			break;
 		case 'k':
 			if (cursor > 0) cursor--;
 			break;
 		case '\r':
 		case '\n':
-			play_song(cursor);
-			if (shuffle) shuffle_mark(cursor);
+			if (display_len() > 0) {
+				play_song(song_at(cursor));
+				if (shuffle) shuffle_mark(song_at(cursor));
+			}
 			break;
 		case ' ':
 			if (mpv_pid > 0) {
 				mpv_cmd("{\"command\":[\"cycle\",\"pause\"]}\n");
 				paused = !paused;
-			} else {
-				play_song(cursor);
-				if (shuffle) shuffle_mark(cursor);
+			} else if (display_len() > 0) {
+				play_song(song_at(cursor));
+				if (shuffle) shuffle_mark(song_at(cursor));
 			}
 			break;
 		case 'h':
@@ -485,11 +565,20 @@ int main(int argc, char **argv) {
 		case 0x1b: /* ESC */
 			kill_mpv();
 			break;
+		case '/':
+		case '?':
+			search_prev_cursor = song_at(cursor);
+			search_buf[0] = '\0';
+			search_len = 0;
+			filter_active = 0;
+			cursor = search_prev_cursor;
+			searching = 1;
+			break;
 		case 'g':
-			cursor = 0;
+			if (display_len() > 0) cursor = 0;
 			break;
 		case 'G':
-			cursor = nsongs - 1;
+			if (display_len() > 0) cursor = display_len() - 1;
 			break;
 		}
 
