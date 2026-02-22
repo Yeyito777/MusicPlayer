@@ -38,8 +38,14 @@ static double song_pos = 0;
 static double song_dur = 0;
 static int volume = 100;
 
-#define CONFIG_FILE "config.conf"
-static const char *config_file = CONFIG_FILE;
+#define STATE_FILE "state.save"
+static const char *state_file = STATE_FILE;
+
+static char saved_song[1024];
+static char saved_cursor[1024];
+static double saved_pos = 0;
+static char saved_playlist[256];
+static int saved_paused = 0;
 
 static int searching = 0;
 static char search_buf[256];
@@ -237,24 +243,116 @@ static void scan_playlists(void) {
 	free(namelist);
 }
 
-static void load_config(void) {
-	FILE *f = fopen(config_file, "r");
+static void load_playlist(int idx);
+static int find_in_display(int song_idx);
+static int song_at(int pos);
+static int display_len(void);
+static void play_song(int idx);
+
+static void load_state(void) {
+	FILE *f = fopen(state_file, "r");
 	if (!f) return;
-	char line[256];
+	char line[1024];
 	while (fgets(line, sizeof(line), f)) {
+		int len = strlen(line);
+		while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+			line[--len] = '\0';
+
 		int v;
+		char s[16];
 		if (sscanf(line, "volume=%d", &v) == 1) {
 			if (v >= 0 && v <= 100) volume = v;
+		} else if (strncmp(line, "song=", 5) == 0) {
+			strncpy(saved_song, line + 5, sizeof(saved_song) - 1);
+			saved_song[sizeof(saved_song) - 1] = '\0';
+		} else if (sscanf(line, "position=%lf", &saved_pos) == 1) {
+			/* parsed inline */
+		} else if (strncmp(line, "cursor=", 7) == 0) {
+			strncpy(saved_cursor, line + 7, sizeof(saved_cursor) - 1);
+			saved_cursor[sizeof(saved_cursor) - 1] = '\0';
+		} else if (strncmp(line, "playlist=", 9) == 0) {
+			strncpy(saved_playlist, line + 9, sizeof(saved_playlist) - 1);
+			saved_playlist[sizeof(saved_playlist) - 1] = '\0';
+		} else if (sscanf(line, "loop=%15s", s) == 1) {
+			if (strcmp(s, "single") == 0) loop_mode = LOOP_SINGLE;
+			else loop_mode = LOOP_ALL;
+		} else if (sscanf(line, "shuffle=%d", &v) == 1) {
+			shuffle = (v != 0);
+		} else if (sscanf(line, "paused=%d", &v) == 1) {
+			saved_paused = (v != 0);
 		}
 	}
 	fclose(f);
 }
 
-static void save_config(void) {
-	FILE *f = fopen(config_file, "w");
+static void save_state(void) {
+	FILE *f = fopen(state_file, "w");
 	if (!f) return;
 	fprintf(f, "volume=%d\n", volume);
+	if (playing >= 0) {
+		fprintf(f, "song=%s\n", songs[playing]);
+		fprintf(f, "position=%.2f\n", song_pos);
+		fprintf(f, "paused=%d\n", paused);
+	}
+	if (display_len() > 0 && cursor >= 0 && cursor < display_len())
+		fprintf(f, "cursor=%s\n", songs[song_at(cursor)]);
+	if (playlist_active >= 0)
+		fprintf(f, "playlist=%s\n", playlists[playlist_active]);
+	fprintf(f, "loop=%s\n", (loop_mode == LOOP_SINGLE) ? "single" : "all");
+	fprintf(f, "shuffle=%d\n", shuffle);
 	fclose(f);
+}
+
+static void restore_state(void) {
+	/* restore playlist first (affects find_in_display) */
+	if (saved_playlist[0]) {
+		for (int i = 0; i < nplaylists; i++) {
+			if (strcmp(playlists[i], saved_playlist) == 0) {
+				playlist_active = i;
+				load_playlist(i);
+				break;
+			}
+		}
+	}
+
+	/* restore cursor */
+	if (saved_cursor[0]) {
+		for (int i = 0; i < nsongs; i++) {
+			if (strcmp(songs[i], saved_cursor) == 0) {
+				cursor = find_in_display(i);
+				break;
+			}
+		}
+	}
+
+	/* restore playback */
+	if (saved_song[0]) {
+		int idx = -1;
+		for (int i = 0; i < nsongs; i++) {
+			if (strcmp(songs[i], saved_song) == 0) {
+				idx = i;
+				break;
+			}
+		}
+		if (idx >= 0) {
+			play_song(idx);
+			/* wait for mpv IPC socket */
+			for (int i = 0; i < 10; i++) {
+				usleep(50000);
+				if (mpv_connect() == 0) break;
+			}
+			if (saved_pos > 0) {
+				char cmd[128];
+				snprintf(cmd, sizeof(cmd),
+					"{\"command\":[\"seek\",%.2f,\"absolute\"]}\n", saved_pos);
+				mpv_cmd(cmd);
+			}
+			if (saved_paused) {
+				mpv_cmd("{\"command\":[\"cycle\",\"pause\"]}\n");
+				paused = 1;
+			}
+		}
+	}
 }
 
 static void load_playlist(int idx) {
@@ -630,13 +728,13 @@ int main(int argc, char **argv) {
 	if (home) {
 		static char songs_path[PATH_MAX];
 		static char playlists_path[PATH_MAX];
-		static char config_path[PATH_MAX];
+		static char state_path[PATH_MAX];
 		snprintf(songs_path, sizeof(songs_path), "%s/%s", home, SONGS_DIR);
 		snprintf(playlists_path, sizeof(playlists_path), "%s/%s", home, PLAYLISTS_DIR);
-		snprintf(config_path, sizeof(config_path), "%s/%s", home, CONFIG_FILE);
+		snprintf(state_path, sizeof(state_path), "%s/%s", home, STATE_FILE);
 		songs_dir = songs_path;
 		playlists_dir = playlists_path;
-		config_file = config_path;
+		state_file = state_path;
 	}
 	const char *env_dir = getenv("SONGS_DIR");
 	if (env_dir)
@@ -648,6 +746,7 @@ int main(int argc, char **argv) {
 	srand(time(NULL));
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
+	signal(SIGQUIT, sig_handler);
 	signal(SIGPIPE, SIG_IGN);
 
 	if (scan_songs() == 0) {
@@ -655,9 +754,10 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	scan_playlists();
-	load_config();
+	load_state();
 
 	term_raw();
+	restore_state();
 	draw();
 
 	struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -669,6 +769,7 @@ int main(int argc, char **argv) {
 		update_position();
 
 		if (ready <= 0) {
+			save_state();
 			draw();
 			continue;
 		}
@@ -697,6 +798,7 @@ int main(int argc, char **argv) {
 			playlist_menu = !playlist_menu;
 			if (playlist_menu)
 				playlist_cursor = (playlist_active >= 0) ? playlist_active + 1 : 0;
+			save_state();
 			draw();
 			continue;
 		}
@@ -720,6 +822,7 @@ int main(int argc, char **argv) {
 					apply_filter();
 				}
 			}
+			save_state();
 			draw();
 			continue;
 		}
@@ -758,6 +861,7 @@ int main(int argc, char **argv) {
 				playlist_menu = 0;
 				break;
 			}
+			save_state();
 			draw();
 			continue;
 		}
@@ -802,14 +906,12 @@ int main(int argc, char **argv) {
 			if (volume > 100) volume = 100;
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"add\",\"volume\",5]}\n");
-			save_config();
 			break;
 		case '-':
 			volume -= 5;
 			if (volume < 0) volume = 0;
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"add\",\"volume\",-5]}\n");
-			save_config();
 			break;
 		case 'm':
 			if (loop_mode == LOOP_SINGLE) {
@@ -896,6 +998,7 @@ int main(int argc, char **argv) {
 		}
 		}
 
+		save_state();
 		draw();
 	}
 

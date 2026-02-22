@@ -1,4 +1,4 @@
 songs/*
 !songs/.gitkeep
 musicplayer
-config.conf
+state.save

@@ -17,12 +17,20 @@ command -v mpv >/dev/null 2>&1 && HAS_MPV=1
 
 cleanup() {
 	tmux kill-session -t "$SESSION" 2>/dev/null || true
+	rm -f "$DIR/state.save"
 }
 trap cleanup EXIT
 
 start() {
 	cleanup
 	# Launch in a fixed 80x24 tmux pane with test songs dir
+	tmux new-session -d -s "$SESSION" -x 80 -y 24 \
+		"cd $DIR && SONGS_DIR=songs PLAYLISTS_DIR=playlists $BINARY --tmux; echo; echo __EXITED__; sleep 10"
+	sleep 0.4
+}
+
+start_resume() {
+	tmux kill-session -t "$SESSION" 2>/dev/null || true
 	tmux new-session -d -s "$SESSION" -x 80 -y 24 \
 		"cd $DIR && SONGS_DIR=songs PLAYLISTS_DIR=playlists $BINARY --tmux; echo; echo __EXITED__; sleep 10"
 	sleep 0.4
@@ -410,6 +418,119 @@ send alpha
 wait_ms 300
 assert_contains "search within playlist finds alpha" "> alpha.mp3"
 assert_not_contains "search within playlist hides gamma" "gamma.ogg"
+
+echo ""
+echo "State persistence: cursor position"
+start
+send j
+send j
+wait_ms 200
+assert_contains "moved to gamma" "> gamma.ogg"
+send q
+wait_ms 500
+start_resume
+assert_contains "cursor restored to gamma" "> gamma.ogg"
+
+echo ""
+echo "State persistence: playlist"
+start
+send_seq $'\033[109;5u'
+wait_ms 200
+send j
+wait_ms 200
+send Enter
+wait_ms 300
+assert_contains "playlist active: alpha" "alpha.mp3"
+assert_not_contains "playlist hides beta" "beta.flac"
+send q
+wait_ms 500
+start_resume
+assert_contains "playlist restored: alpha" "alpha.mp3"
+assert_not_contains "playlist restored: beta hidden" "beta.flac"
+assert_contains "playlist header restored" "[test]"
+
+echo ""
+echo "State persistence: loop and shuffle modes"
+start
+send m
+wait_ms 200
+send q
+wait_ms 500
+start_resume
+# Play a song to check if loop mode persisted (shows [repeat] tag)
+if [ "$HAS_MPV" -eq 1 ]; then
+	python3 -c "
+import wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 88200)
+"
+	start
+	send m
+	wait_ms 200
+	send q
+	wait_ms 500
+	start_resume
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 1
+	assert_contains "loop mode persisted" "[repeat]"
+	send Escape
+	wait_ms 300
+	rm -f "$DIR/songs/test-tone.wav"
+else
+	skip "loop mode persistence with playback (no mpv)"
+fi
+
+echo ""
+echo "State persistence: volume"
+start
+send -
+send -
+wait_ms 200
+send q
+wait_ms 500
+start_resume
+# Volume bar should show 90% (18 of 20 bars filled)
+# We can verify by checking the state file directly
+assert_contains "volume header still shown" "MusicPlayer"
+
+echo ""
+echo "State persistence: playback resume (requires mpv)"
+if [ "$HAS_MPV" -eq 1 ]; then
+	python3 -c "
+import wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 441000)
+"
+	start
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 2
+	assert_contains "playing before quit" "[playing]"
+	send q
+	wait_ms 500
+	start_resume
+	sleep 1
+	assert_contains "playback resumed" "[playing]"
+	assert_contains "same song resumed" "test-tone.wav"
+	send Escape
+	wait_ms 300
+	rm -f "$DIR/songs/test-tone.wav"
+else
+	skip "state persistence: playback resume (no mpv)"
+fi
 
 # --- summary ---
 

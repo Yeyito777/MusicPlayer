@@ -16,7 +16,7 @@ When set, the three default paths resolve under it:
 |--------------|------------------|------------------------------------|
 | Songs dir    | `songs`          | `$MUSIC_PLAYER_HOME/songs`         |
 | Playlists dir| `playlists`      | `$MUSIC_PLAYER_HOME/playlists`     |
-| Config file  | `config.conf`    | `$MUSIC_PLAYER_HOME/config.conf`   |
+| State file   | `state.save`     | `$MUSIC_PLAYER_HOME/state.save`    |
 
 ## Per-directory overrides
 
@@ -29,12 +29,12 @@ MUSIC_PLAYER_HOME=~/music SONGS_DIR=/mnt/nas/songs musicplayer
 
 ## Resolution order
 
-1. Defaults set to compile-time constants (`"songs"`, `"playlists"`, `"config.conf"`)
+1. Defaults set to compile-time constants (`"songs"`, `"playlists"`, `"state.save"`)
 2. If `MUSIC_PLAYER_HOME` is set, defaults are prefixed with it
 3. If `SONGS_DIR` is set, it replaces the songs path
 4. If `PLAYLISTS_DIR` is set, it replaces the playlists path
 
-Config file has no individual env override — it always follows `MUSIC_PLAYER_HOME` or cwd.
+State file has no individual env override — it always follows `MUSIC_PLAYER_HOME` or cwd.
 
 ## Typical usage
 
