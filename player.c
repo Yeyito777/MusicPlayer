@@ -668,26 +668,30 @@ static void shuffle_mark(int idx) {
 		played[idx] = 1;
 		nplayed++;
 	}
-	if (nplayed >= nsongs)
+	if (nplayed >= display_len())
 		shuffle_clear();
 }
 
 static int shuffle_next(void) {
-	int avail = nsongs - nplayed;
+	int len = display_len();
+	int avail = 0;
+	for (int i = 0; i < len; i++)
+		if (!played[song_at(i)])
+			avail++;
 	if (avail <= 0) {
 		shuffle_clear();
-		avail = nsongs;
+		avail = len;
 	}
 	int pick = rand() % avail;
 	int count = 0;
-	for (int i = 0; i < nsongs; i++) {
-		if (!played[i]) {
+	for (int i = 0; i < len; i++) {
+		if (!played[song_at(i)]) {
 			if (count == pick)
-				return i;
+				return song_at(i);
 			count++;
 		}
 	}
-	return 0;
+	return song_at(0);
 }
 
 static void check_child(void) {
@@ -709,10 +713,19 @@ static void check_child(void) {
 					int next = shuffle_next();
 					shuffle_mark(next);
 					play_song(next);
-				} else if (prev + 1 < nsongs) {
-					play_song(prev + 1);
 				} else {
-					play_song(0); /* wrap to top */
+					int len = display_len();
+					int cur = -1;
+					for (int i = 0; i < len; i++) {
+						if (song_at(i) == prev) {
+							cur = i;
+							break;
+						}
+					}
+					if (cur >= 0 && cur + 1 < len)
+						play_song(song_at(cur + 1));
+					else
+						play_song(song_at(0));
 				}
 			}
 		}
@@ -891,6 +904,10 @@ int main(int argc, char **argv) {
 				play_song(song_at(cursor));
 				if (shuffle) shuffle_mark(song_at(cursor));
 			}
+			break;
+		case '0':
+			if (mpv_pid > 0)
+				mpv_cmd("{\"command\":[\"seek\",\"0\",\"absolute\"]}\n");
 			break;
 		case 'h':
 			if (mpv_pid > 0)
