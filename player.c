@@ -913,10 +913,39 @@ int main(int argc, char **argv) {
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"seek\",\"-5\"]}\n");
 			break;
+		case 'H': {
+			if (playing < 0 || display_len() == 0) break;
+			int len = display_len();
+			int cur = -1;
+			for (int i = 0; i < len; i++) {
+				if (song_at(i) == playing) { cur = i; break; }
+			}
+			int prev = (cur > 0) ? cur - 1 : len - 1;
+			play_song(song_at(prev));
+			if (shuffle) shuffle_mark(song_at(prev));
+			break;
+		}
 		case 'l':
 			if (mpv_pid > 0)
 				mpv_cmd("{\"command\":[\"seek\",\"5\"]}\n");
 			break;
+		case 'L': {
+			if (playing < 0 || display_len() == 0) break;
+			if (shuffle) {
+				int next = shuffle_next();
+				shuffle_mark(next);
+				play_song(next);
+			} else {
+				int len = display_len();
+				int cur = -1;
+				for (int i = 0; i < len; i++) {
+					if (song_at(i) == playing) { cur = i; break; }
+				}
+				int next = (cur >= 0 && cur + 1 < len) ? cur + 1 : 0;
+				play_song(song_at(next));
+			}
+			break;
+		}
 		case '=':
 		case '+':
 			volume += 5;
