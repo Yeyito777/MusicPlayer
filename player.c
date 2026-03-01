@@ -635,7 +635,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else if (!searching) {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle D:del esc:stop q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit\033[0m",
 			rows);
 	}
 
@@ -1055,7 +1055,7 @@ int main(int argc, char **argv) {
 				if (playing >= 0) shuffle_mark(playing);
 			}
 			break;
-		case 'D': {
+		case 'd': {
 			if (display_len() == 0) break;
 			int sidx = song_at(cursor);
 			if (delete_pending == sidx) {
@@ -1069,6 +1069,7 @@ int main(int argc, char **argv) {
 			break;
 		}
 		case 0x1b: /* ESC */
+			delete_pending = -1;
 			kill_mpv();
 			break;
 		case '/':
