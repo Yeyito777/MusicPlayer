@@ -8,6 +8,7 @@
 #include <time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -68,6 +69,9 @@ static int playlist_cursor = 0;
 static int playlist_active = -1;
 static int playlist_songs[MAX_SONGS];
 static int nplaylist_songs = 0;
+
+static int delete_pending = -1; /* songs[] index marked for deletion */
+static char trash_dir[PATH_MAX];
 
 static void die(const char *msg) {
 	perror(msg);
@@ -559,7 +563,15 @@ static void draw(void) {
 		const char *style = "";
 		const char *reset = "";
 
-		if (dpos == cursor && sidx == playing) {
+		if (sidx == delete_pending) {
+			if (dpos == cursor) {
+				prefix = "> ";
+				style = "\033[1;31m";
+			} else {
+				style = "\033[31m";
+			}
+			reset = "\033[0m";
+		} else if (dpos == cursor && sidx == playing) {
 			prefix = "> ";
 			style = "\033[1;32m";
 			reset = "\033[0m";
@@ -573,7 +585,9 @@ static void draw(void) {
 		}
 
 		const char *suffix = "";
-		if (sidx == playing) {
+		if (sidx == delete_pending) {
+			suffix = " [delete]";
+		} else if (sidx == playing) {
 			if (loop_mode == LOOP_SINGLE) suffix = " [repeat]";
 			else if (shuffle) suffix = " [shuffle]";
 		}
@@ -621,7 +635,7 @@ static void draw(void) {
 			"\033[0m %d:%02d", dm, ds);
 	} else if (!searching) {
 		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav  spc:play/pause  h/l:seek  -/+:vol  m:loop  n:shuffle  esc:stop  q:quit\033[0m",
+			"\033[%d;1H\033[2mj/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle D:del esc:stop q:quit\033[0m",
 			rows);
 	}
 
@@ -694,6 +708,58 @@ static int shuffle_next(void) {
 	return song_at(0);
 }
 
+static void remove_song(int rm) {
+	/* stop playback if this song is playing */
+	if (playing == rm)
+		kill_mpv();
+
+	/* move file to trash */
+	mkdir(trash_dir, 0755);
+	char src[PATH_MAX + 1024], dst[PATH_MAX + 1024];
+	snprintf(src, sizeof(src), "%s/%s", songs_dir, songs[rm]);
+	snprintf(dst, sizeof(dst), "%s/%s", trash_dir, songs[rm]);
+	rename(src, dst);
+
+	/* free the name */
+	free(songs[rm]);
+
+	/* adjust playing index */
+	if (playing > rm) playing--;
+	else if (playing == rm) playing = -1;
+
+	/* shift songs[] array down */
+	for (int i = rm; i < nsongs - 1; i++)
+		songs[i] = songs[i + 1];
+	nsongs--;
+
+	/* adjust playlist_songs[]: remove entry and shift indices */
+	int pw = 0;
+	for (int i = 0; i < nplaylist_songs; i++) {
+		if (playlist_songs[i] == rm) continue;
+		int val = playlist_songs[i];
+		if (val > rm) val--;
+		playlist_songs[pw++] = val;
+	}
+	nplaylist_songs = pw;
+
+	/* adjust filtered[]: remove entry and shift indices */
+	int fw = 0;
+	for (int i = 0; i < nfiltered; i++) {
+		if (filtered[i] == rm) continue;
+		int val = filtered[i];
+		if (val > rm) val--;
+		filtered[fw++] = val;
+	}
+	nfiltered = fw;
+
+	/* clear shuffle state — indices are invalidated */
+	shuffle_clear();
+
+	/* clamp cursor to valid range */
+	if (cursor >= display_len()) cursor = display_len() - 1;
+	if (cursor < 0) cursor = 0;
+}
+
 static void check_child(void) {
 	if (mpv_pid > 0) {
 		int status;
@@ -755,6 +821,16 @@ int main(int argc, char **argv) {
 	const char *env_pdir = getenv("PLAYLISTS_DIR");
 	if (env_pdir)
 		playlists_dir = env_pdir;
+
+	/* derive trash_dir as sibling of songs_dir */
+	strncpy(trash_dir, songs_dir, sizeof(trash_dir) - 1);
+	trash_dir[sizeof(trash_dir) - 1] = '\0';
+	char *last_slash = strrchr(trash_dir, '/');
+	if (last_slash) {
+		strcpy(last_slash + 1, "trash");
+	} else {
+		strcpy(trash_dir, "trash");
+	}
 
 	srand(time(NULL));
 	signal(SIGINT, sig_handler);
@@ -979,6 +1055,19 @@ int main(int argc, char **argv) {
 				if (playing >= 0) shuffle_mark(playing);
 			}
 			break;
+		case 'D': {
+			if (display_len() == 0) break;
+			int sidx = song_at(cursor);
+			if (delete_pending == sidx) {
+				/* confirm deletion */
+				remove_song(sidx);
+				delete_pending = -1;
+			} else {
+				/* mark for deletion */
+				delete_pending = sidx;
+			}
+			break;
+		}
 		case 0x1b: /* ESC */
 			kill_mpv();
 			break;
