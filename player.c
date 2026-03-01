@@ -1069,8 +1069,11 @@ int main(int argc, char **argv) {
 			break;
 		}
 		case 0x1b: /* ESC */
-			delete_pending = -1;
-			kill_mpv();
+			if (delete_pending >= 0) {
+				delete_pending = -1;
+			} else {
+				kill_mpv();
+			}
 			break;
 		case '/':
 		case '?':
