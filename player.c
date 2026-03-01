@@ -842,6 +842,9 @@ int main(int argc, char **argv) {
 
 		if (playlist_menu) {
 			switch (c) {
+			case 0x03: /* Ctrl+C */
+				cleanup();
+				return 0;
 			case 'j':
 				if (playlist_cursor < nplaylists) playlist_cursor++;
 				break;
@@ -881,6 +884,7 @@ int main(int argc, char **argv) {
 
 		switch (c) {
 		case 'q':
+		case 0x03: /* Ctrl+C (SIGINT blocked by raw mode, handle byte directly) */
 			cleanup();
 			return 0;
 		case 'j':
