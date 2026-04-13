@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
@@ -60,6 +61,26 @@ static int filter_active = 0;
 #define PLAYLISTS_DIR "playlists"
 #define SIDEBAR_WIDTH 24
 
+#define ESC "\033["
+#define ANSI_RESET ESC "0m"
+#define ANSI_BOLD ESC "1m"
+#define ANSI_DIM ESC "2m"
+#define FG_TEXT ESC "38;2;255;255;255m"
+#define FG_ACCENT ESC "38;2;29;155;240m"
+#define BG_APP ESC "48;2;0;5;15m"
+#define BG_SIDEBAR ESC "48;2;3;8;20m"
+#define BG_ACCENT ESC "48;2;29;155;240m"
+#define MAIN_BASE ANSI_RESET FG_TEXT BG_APP
+#define SIDEBAR_BASE ANSI_RESET FG_TEXT BG_SIDEBAR
+#define MAIN_ACCENT ANSI_RESET FG_ACCENT BG_APP
+#define MAIN_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_APP
+#define MAIN_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
+#define SIDEBAR_ACCENT ANSI_RESET FG_ACCENT BG_SIDEBAR
+#define SIDEBAR_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_SIDEBAR
+#define SIDEBAR_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
+#define MAIN_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_APP
+#define SIDEBAR_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_SIDEBAR
+
 static const char *playlists_dir = PLAYLISTS_DIR;
 static char *playlists[MAX_PLAYLISTS];
 static int nplaylists = 0;
@@ -80,7 +101,11 @@ static void die(const char *msg) {
 
 static void term_restore(void) {
 	if (!tmux_mode)
-		write(STDOUT_FILENO, "\033[?1049l\033[?25h", 14);
+		write(STDOUT_FILENO, ANSI_RESET "\033[?1049l\033[?25h",
+			sizeof(ANSI_RESET "\033[?1049l\033[?25h") - 1);
+	else
+		write(STDOUT_FILENO, ANSI_RESET "\033[?25h",
+			sizeof(ANSI_RESET "\033[?25h") - 1);
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
@@ -456,92 +481,155 @@ static void apply_filter(void) {
 	}
 }
 
+static void flush_buf(char *buf, int *len) {
+	if (*len > 0) {
+		write(STDOUT_FILENO, buf, *len);
+		*len = 0;
+	}
+}
+
+static void appendf(char *buf, int *len, size_t size, const char *fmt, ...) {
+	va_list ap;
+
+	for (;;) {
+		va_start(ap, fmt);
+		int n = vsnprintf(buf + *len, size - *len, fmt, ap);
+		va_end(ap);
+		if (n < 0)
+			return;
+		if ((size_t)n < size - *len) {
+			*len += n;
+			return;
+		}
+
+		flush_buf(buf, len);
+		if ((size_t)n >= size) {
+			char *tmp = malloc((size_t)n + 1);
+			if (!tmp)
+				return;
+			va_start(ap, fmt);
+			vsnprintf(tmp, (size_t)n + 1, fmt, ap);
+			va_end(ap);
+			write(STDOUT_FILENO, tmp, (size_t)n);
+			free(tmp);
+			return;
+		}
+	}
+}
+
+static void append_repeat(char *buf, int *len, size_t size, char ch, int count) {
+	for (int i = 0; i < count; i++) {
+		if (*len >= (int)size - 1)
+			flush_buf(buf, len);
+		buf[(*len)++] = ch;
+	}
+}
+
 static void draw(void) {
 	int rows = term_rows();
 	int cols = term_cols();
 	int list_rows = rows - 4; /* header + separator + status + progress */
+	if (list_rows < 0)
+		list_rows = 0;
 
-	/* clear screen, move to top */
-	write(STDOUT_FILENO, "\033[2J\033[H", 7);
+	write(STDOUT_FILENO, MAIN_BASE "\033[2J\033[H",
+		sizeof(MAIN_BASE "\033[2J\033[H") - 1);
 
-	char buf[8192];
+	char buf[65536];
 	int len = 0;
+	char line[4096];
 
 	int main_cols = cols;
-	int sb_col = 0; /* sidebar start column (0 = no sidebar) */
+	int sidebar_width = 0;
+	int sb_col = 0;
 
-	if (playlist_menu) {
-		main_cols = cols - SIDEBAR_WIDTH - 1;
-		sb_col = cols - SIDEBAR_WIDTH + 1;
+	if (playlist_menu && cols > 2) {
+		sidebar_width = SIDEBAR_WIDTH;
+		if (sidebar_width > cols - 2)
+			sidebar_width = cols - 2;
+		if (sidebar_width < 1)
+			sidebar_width = 1;
 
-		/* sidebar header */
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[1;%dH\033[1mPlaylists\033[0m", sb_col);
+		main_cols = cols - sidebar_width - 1;
+		if (main_cols < 1)
+			main_cols = 1;
+		sb_col = main_cols + 2;
 
-		/* sidebar separator */
-		len += snprintf(buf + len, sizeof(buf) - len, "\033[2;%dH", sb_col);
-		for (int i = 0; i < SIDEBAR_WIDTH && len < (int)sizeof(buf) - 1; i++)
-			buf[len++] = '-';
+		for (int r = 1; r <= rows; r++) {
+			appendf(buf, &len, sizeof(buf), "\033[%d;%dH%s", r, sb_col, SIDEBAR_BASE);
+			append_repeat(buf, &len, sizeof(buf), ' ', sidebar_width);
+			appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
+		}
 
-		/* sidebar entries */
+		appendf(buf, &len, sizeof(buf),
+			"\033[1;%dH%s%-*.*s%s",
+			sb_col, SIDEBAR_ACCENT_BOLD,
+			sidebar_width, sidebar_width, " Playlists", MAIN_BASE);
+
+		appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", sb_col, SIDEBAR_ACCENT);
+		append_repeat(buf, &len, sizeof(buf), '-', sidebar_width);
+		appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
+
 		for (int i = 0; i <= nplaylists && i < list_rows; i++) {
 			int row = i + 3;
 			const char *name = (i == 0) ? "[All Songs]" : playlists[i - 1];
 			const char *pfix = (i == playlist_cursor) ? "> " : "  ";
-			const char *st = "";
-			const char *rs = "";
+			const char *style = SIDEBAR_BASE;
 			int is_active = (i == 0 && playlist_active == -1) ||
 				(i > 0 && playlist_active == i - 1);
 
-			if (i == playlist_cursor && is_active) {
-				st = "\033[1;32m"; rs = "\033[0m";
-			} else if (i == playlist_cursor) {
-				st = "\033[1m"; rs = "\033[0m";
-			} else if (is_active) {
-				st = "\033[32m"; rs = "\033[0m";
-			}
+			if (i == playlist_cursor)
+				style = SIDEBAR_SELECTED;
+			else if (is_active)
+				style = SIDEBAR_ACCENT_BOLD;
 
-			len += snprintf(buf + len, sizeof(buf) - len,
-				"\033[%d;%dH%s%s%s%s", row, sb_col, st, pfix, name, rs);
+			snprintf(line, sizeof(line), "%s%s", pfix, name);
+			appendf(buf, &len, sizeof(buf),
+				"\033[%d;%dH%s%-*.*s%s",
+				row, sb_col, style,
+				sidebar_width, sidebar_width, line, MAIN_BASE);
 		}
 
-		/* border */
 		int border_col = sb_col - 1;
 		for (int r = 1; r <= rows; r++) {
-			len += snprintf(buf + len, sizeof(buf) - len,
-				"\033[%d;%dH|", r, border_col);
-			if (len >= (int)sizeof(buf) - 256) {
-				write(STDOUT_FILENO, buf, len);
-				len = 0;
-			}
+			appendf(buf, &len, sizeof(buf),
+				"\033[%d;%dH%s|%s",
+				r, border_col, MAIN_ACCENT, MAIN_BASE);
 		}
+	} else if (main_cols < 1) {
+		main_cols = 1;
 	}
 
-	/* main header + volume indicator */
 	if (playlist_active >= 0) {
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[1;1H\033[1m  MusicPlayer [%s]\033[0m", playlists[playlist_active]);
+		appendf(buf, &len, sizeof(buf),
+			"\033[1;1H%s  MusicPlayer [%s]%s",
+			MAIN_ACCENT_BOLD, playlists[playlist_active], MAIN_BASE);
 	} else {
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[1;1H\033[1m  MusicPlayer\033[0m");
+		appendf(buf, &len, sizeof(buf),
+			"\033[1;1H%s  MusicPlayer%s",
+			MAIN_ACCENT_BOLD, MAIN_BASE);
 	}
 	{
 		int vbars = volume / 5;
-		len += snprintf(buf + len, sizeof(buf) - len, " | [");
+		if (vbars < 0)
+			vbars = 0;
+		if (vbars > 20)
+			vbars = 20;
+
+		appendf(buf, &len, sizeof(buf), " | [");
 		if (vbars > 0)
-			len += snprintf(buf + len, sizeof(buf) - len, "\033[32m");
+			appendf(buf, &len, sizeof(buf), "%s", MAIN_ACCENT);
 		for (int i = 0; i < 20; i++) {
 			if (i == vbars)
-				len += snprintf(buf + len, sizeof(buf) - len, "\033[2m");
-			buf[len++] = '|';
+				appendf(buf, &len, sizeof(buf), "%s", MAIN_DIM);
+			append_repeat(buf, &len, sizeof(buf), '|', 1);
 		}
-		len += snprintf(buf + len, sizeof(buf) - len, "\033[0m]");
+		appendf(buf, &len, sizeof(buf), "%s]", MAIN_BASE);
 	}
 
-	/* main separator */
-	len += snprintf(buf + len, sizeof(buf) - len, "\033[2;1H");
-	for (int i = 0; i < main_cols && len < (int)sizeof(buf) - 1; i++)
-		buf[len++] = '-';
+	appendf(buf, &len, sizeof(buf), "\033[2;1H%s", MAIN_ACCENT);
+	append_repeat(buf, &len, sizeof(buf), '-', main_cols);
+	appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
 	/* song list — vim-style edge scrolling */
 	int count = display_len();
@@ -559,29 +647,15 @@ static void draw(void) {
 	for (int i = 0; i < list_rows && (i + scroll_offset) < count; i++) {
 		int dpos = i + scroll_offset;
 		int sidx = song_at(dpos);
-		const char *prefix = "  ";
-		const char *style = "";
-		const char *reset = "";
+		const char *prefix = (dpos == cursor) ? "> " : "  ";
+		const char *style = MAIN_BASE;
 
-		if (sidx == delete_pending) {
-			if (dpos == cursor) {
-				prefix = "> ";
-				style = "\033[1;31m";
-			} else {
-				style = "\033[31m";
-			}
-			reset = "\033[0m";
-		} else if (dpos == cursor && sidx == playing) {
-			prefix = "> ";
-			style = "\033[1;32m";
-			reset = "\033[0m";
-		} else if (dpos == cursor) {
-			prefix = "> ";
-			style = "\033[1m";
-			reset = "\033[0m";
+		if (dpos == cursor) {
+			style = MAIN_SELECTED;
+		} else if (sidx == delete_pending) {
+			style = MAIN_ACCENT_BOLD;
 		} else if (sidx == playing) {
-			style = "\033[32m";
-			reset = "\033[0m";
+			style = MAIN_ACCENT;
 		}
 
 		const char *suffix = "";
@@ -592,14 +666,10 @@ static void draw(void) {
 			else if (shuffle) suffix = " [shuffle]";
 		}
 
-		int row = i + 3;
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H%s%s%s%s%s", row, style, prefix, songs[sidx], suffix, reset);
-
-		if (len >= (int)sizeof(buf) - 256) {
-			write(STDOUT_FILENO, buf, len);
-			len = 0;
-		}
+		snprintf(line, sizeof(line), "%s%s%s", prefix, songs[sidx], suffix);
+		appendf(buf, &len, sizeof(buf),
+			"\033[%d;1H%s%-*.*s%s",
+			i + 3, style, main_cols, main_cols, line, MAIN_BASE);
 	}
 
 	/* status lines at bottom */
@@ -611,8 +681,10 @@ static void draw(void) {
 		int pm = (int)song_pos / 60, ps = (int)song_pos % 60;
 		int dm = (int)song_dur / 60, ds = (int)song_dur % 60;
 
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[32m%s%s %s\033[0m", rows - 1, state, lmode, songs[playing]);
+		snprintf(line, sizeof(line), "%s%s %s", state, lmode, songs[playing]);
+		appendf(buf, &len, sizeof(buf),
+			"\033[%d;1H%s%-*.*s%s",
+			rows - 1, MAIN_ACCENT_BOLD, main_cols, main_cols, line, MAIN_BASE);
 
 		int bar_max = main_cols - 14;
 		if (bar_max < 4) bar_max = 4;
@@ -621,30 +693,33 @@ static void draw(void) {
 			filled = (int)(song_pos / song_dur * bar_max);
 		if (filled > bar_max) filled = bar_max;
 
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H%d:%02d \033[32m", rows, pm, ps);
+		appendf(buf, &len, sizeof(buf),
+			"\033[%d;1H%s%d:%02d %s",
+			rows, MAIN_BASE, pm, ps, MAIN_ACCENT);
 		for (int i = 0; i < bar_max; i++) {
 			if (i < filled)
-				buf[len++] = '=';
+				append_repeat(buf, &len, sizeof(buf), '=', 1);
 			else if (i == filled)
-				buf[len++] = '>';
+				append_repeat(buf, &len, sizeof(buf), '>', 1);
 			else
-				buf[len++] = '-';
+				append_repeat(buf, &len, sizeof(buf), '-', 1);
 		}
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[0m %d:%02d", dm, ds);
+		appendf(buf, &len, sizeof(buf), "%s %d:%02d", MAIN_BASE, dm, ds);
 	} else if (!searching) {
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2mj/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit\033[0m",
-			rows);
+		const char *help = "j/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit";
+		appendf(buf, &len, sizeof(buf),
+			"\033[%d;1H%s%-*.*s%s",
+			rows, MAIN_DIM, main_cols, main_cols, help, MAIN_BASE);
 	}
 
 	if (searching) {
-		len += snprintf(buf + len, sizeof(buf) - len,
-			"\033[%d;1H\033[2m/%s_\033[0m", rows, search_buf);
+		snprintf(line, sizeof(line), "/%s_", search_buf);
+		appendf(buf, &len, sizeof(buf),
+			"\033[%d;1H%s%-*.*s%s",
+			rows, MAIN_DIM, main_cols, main_cols, line, MAIN_BASE);
 	}
 
-	write(STDOUT_FILENO, buf, len);
+	flush_buf(buf, &len);
 }
 
 static void play_song(int idx) {
