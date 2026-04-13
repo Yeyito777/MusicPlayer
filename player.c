@@ -85,6 +85,8 @@ static int filter_active = 0;
 #define SEP_H "─"
 #define SEP_V "│"
 #define SEP_CROSS "┼"
+#define ENABLE_KITTY_KBD ESC ">1u"
+#define DISABLE_KITTY_KBD ESC "<u"
 
 static const char *playlists_dir = PLAYLISTS_DIR;
 static char *playlists[MAX_PLAYLISTS];
@@ -108,11 +110,13 @@ static void die(const char *msg) {
 
 static void term_restore(void) {
 	if (!tmux_mode)
-		write(STDOUT_FILENO, ANSI_RESET "\033[?1049l\033[?25h",
-			sizeof(ANSI_RESET "\033[?1049l\033[?25h") - 1);
+		write(STDOUT_FILENO,
+			ANSI_RESET DISABLE_KITTY_KBD "\033[?1049l\033[?25h",
+			sizeof(ANSI_RESET DISABLE_KITTY_KBD "\033[?1049l\033[?25h") - 1);
 	else
-		write(STDOUT_FILENO, ANSI_RESET "\033[?25h",
-			sizeof(ANSI_RESET "\033[?25h") - 1);
+		write(STDOUT_FILENO,
+			ANSI_RESET DISABLE_KITTY_KBD "\033[?25h",
+			sizeof(ANSI_RESET DISABLE_KITTY_KBD "\033[?25h") - 1);
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
@@ -230,14 +234,23 @@ static void term_raw(void) {
 	atexit(term_restore);
 
 	struct termios raw = orig_termios;
-	raw.c_lflag &= ~(ECHO | ICANON | ISIG);
+	raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+	raw.c_oflag &= ~(OPOST);
+	raw.c_cflag |= CS8;
+	raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
 	raw.c_cc[VMIN] = 1;
 	raw.c_cc[VTIME] = 0;
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
 		die("tcsetattr");
 
 	if (!tmux_mode)
-		write(STDOUT_FILENO, "\033[?1049h\033[?25l", 14);
+		write(STDOUT_FILENO,
+			ENABLE_KITTY_KBD "\033[?1049h\033[?25l",
+			sizeof(ENABLE_KITTY_KBD "\033[?1049h\033[?25l") - 1);
+	else
+		write(STDOUT_FILENO,
+			ENABLE_KITTY_KBD,
+			sizeof(ENABLE_KITTY_KBD) - 1);
 }
 
 static int scan_songs(void) {
@@ -966,9 +979,10 @@ int main(int argc, char **argv) {
 		if (read(STDIN_FILENO, &c, 1) != 1)
 			break;
 
-		int ctrl_j = 0;
+		int ctrl_j = (c == 0x0a);
 		int ctrl_k = (c == 0x0b);
 		int ctrl_m = 0;
+		int enter_key = (c == '\r');
 		if (c == 0x1b) {
 			char seq[32];
 			int slen = 0;
@@ -980,7 +994,10 @@ int main(int argc, char **argv) {
 				if (slen > 1 && seq[slen-1] >= 0x40) break;
 			}
 			seq[slen] = '\0';
-			if (strcmp(seq, "[106;5u") == 0) {
+			if (strcmp(seq, "[13u") == 0) {
+				enter_key = 1;
+				c = 0;
+			} else if (strcmp(seq, "[106;5u") == 0) {
 				ctrl_j = 1;
 				c = 0;
 			} else if (strcmp(seq, "[107;5u") == 0) {
@@ -989,8 +1006,12 @@ int main(int argc, char **argv) {
 			} else if (strcmp(seq, "[109;5u") == 0) {
 				ctrl_m = 1;
 				c = 0;
+			} else if (slen > 0) {
+				c = 0;
 			}
 		}
+		if (enter_key && c == 0)
+			c = '\r';
 
 		if (ctrl_m) {
 			playlist_menu = !playlist_menu;
@@ -1015,7 +1036,7 @@ int main(int argc, char **argv) {
 			c = 0;
 
 		if (searching) {
-			if (c == '\r' || c == '\n') {
+			if (c == '\r') {
 				searching = 0;
 			} else if (c == 0x1b) {
 				searching = 0;
@@ -1057,7 +1078,6 @@ int main(int argc, char **argv) {
 				playlist_cursor = nplaylists;
 				break;
 			case '\r':
-			case '\n':
 				if (playlist_cursor == 0) {
 					playlist_active = -1;
 					nplaylist_songs = 0;
@@ -1094,7 +1114,6 @@ int main(int argc, char **argv) {
 			if (cursor > 0) cursor--;
 			break;
 		case '\r':
-		case '\n':
 			if (display_len() > 0) {
 				play_song(song_at(cursor));
 				if (shuffle) shuffle_mark(song_at(cursor));
