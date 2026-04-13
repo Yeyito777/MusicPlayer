@@ -67,6 +67,7 @@ static int filter_active = 0;
 #define ANSI_DIM ESC "2m"
 #define FG_TEXT ESC "38;2;255;255;255m"
 #define FG_ACCENT ESC "38;2;29;155;240m"
+#define FG_BORDER_UNFOCUSED ESC "38;2;78;79;79m"
 #define BG_APP ESC "48;2;0;5;15m"
 #define BG_SIDEBAR ESC "48;2;3;8;20m"
 #define BG_ACCENT ESC "48;2;29;155;240m"
@@ -74,10 +75,14 @@ static int filter_active = 0;
 #define SIDEBAR_BASE ANSI_RESET FG_TEXT BG_SIDEBAR
 #define MAIN_ACCENT ANSI_RESET FG_ACCENT BG_APP
 #define MAIN_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_APP
+#define MAIN_BORDER_FOCUSED ANSI_RESET FG_ACCENT BG_APP
+#define MAIN_BORDER_UNFOCUSED ANSI_RESET FG_BORDER_UNFOCUSED BG_APP
 #define MAIN_CURSOR ANSI_RESET ANSI_BOLD FG_TEXT BG_APP
 #define MAIN_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
 #define SIDEBAR_ACCENT ANSI_RESET FG_ACCENT BG_SIDEBAR
 #define SIDEBAR_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_SIDEBAR
+#define SIDEBAR_BORDER_FOCUSED ANSI_RESET FG_ACCENT BG_SIDEBAR
+#define SIDEBAR_BORDER_UNFOCUSED ANSI_RESET FG_BORDER_UNFOCUSED BG_SIDEBAR
 #define SIDEBAR_CURSOR ANSI_RESET ANSI_BOLD FG_TEXT BG_SIDEBAR
 #define SIDEBAR_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
 #define MAIN_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_APP
@@ -570,6 +575,8 @@ static void draw(void) {
 	int sb_col = 0;
 	int sidebar_focused = playlist_menu && panel_focus == PANEL_SIDEBAR;
 	int main_focused = !playlist_menu || panel_focus == PANEL_MAIN;
+	const char *sidebar_border = sidebar_focused ? SIDEBAR_BORDER_FOCUSED : SIDEBAR_BORDER_UNFOCUSED;
+	const char *main_border = main_focused ? MAIN_BORDER_FOCUSED : MAIN_BORDER_UNFOCUSED;
 
 	if (playlist_menu && cols > 2) {
 		sidebar_width = SIDEBAR_WIDTH;
@@ -595,7 +602,7 @@ static void draw(void) {
 			sb_col, SIDEBAR_ACCENT_BOLD,
 			sidebar_width, sidebar_width, " Playlists", MAIN_BASE);
 
-		appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", sb_col, SIDEBAR_ACCENT);
+		appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", sb_col, sidebar_border);
 		append_repeat_text(buf, &len, sizeof(buf), SEP_H, sidebar_width);
 		appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
@@ -624,7 +631,7 @@ static void draw(void) {
 			const char *border = (r == 2) ? SEP_CROSS : SEP_V;
 			appendf(buf, &len, sizeof(buf),
 				"\033[%d;%dH%s%s%s",
-				r, border_col, MAIN_ACCENT, border, MAIN_BASE);
+				r, border_col, sidebar_border, border, MAIN_BASE);
 		}
 	} else if (main_cols < 1) {
 		main_cols = 1;
@@ -657,7 +664,7 @@ static void draw(void) {
 		appendf(buf, &len, sizeof(buf), "%s]", MAIN_BASE);
 	}
 
-	appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", main_col, MAIN_ACCENT);
+	appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", main_col, main_border);
 	append_repeat_text(buf, &len, sizeof(buf), SEP_H, main_cols);
 	appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
