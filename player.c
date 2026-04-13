@@ -74,9 +74,11 @@ static int filter_active = 0;
 #define SIDEBAR_BASE ANSI_RESET FG_TEXT BG_SIDEBAR
 #define MAIN_ACCENT ANSI_RESET FG_ACCENT BG_APP
 #define MAIN_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_APP
+#define MAIN_CURSOR ANSI_RESET ANSI_BOLD FG_TEXT BG_APP
 #define MAIN_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
 #define SIDEBAR_ACCENT ANSI_RESET FG_ACCENT BG_SIDEBAR
 #define SIDEBAR_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_SIDEBAR
+#define SIDEBAR_CURSOR ANSI_RESET ANSI_BOLD FG_TEXT BG_SIDEBAR
 #define SIDEBAR_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
 #define MAIN_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_APP
 #define SIDEBAR_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_SIDEBAR
@@ -87,6 +89,8 @@ static int nplaylists = 0;
 
 static int playlist_menu = 0;
 static int playlist_cursor = 0;
+enum { PANEL_MAIN, PANEL_SIDEBAR };
+static int panel_focus = PANEL_MAIN;
 static int playlist_active = -1;
 static int playlist_songs[MAX_SONGS];
 static int nplaylist_songs = 0;
@@ -543,6 +547,8 @@ static void draw(void) {
 	int main_col = 1;
 	int sidebar_width = 0;
 	int sb_col = 0;
+	int sidebar_focused = playlist_menu && panel_focus == PANEL_SIDEBAR;
+	int main_focused = !playlist_menu || panel_focus == PANEL_MAIN;
 
 	if (playlist_menu && cols > 2) {
 		sidebar_width = SIDEBAR_WIDTH;
@@ -581,7 +587,7 @@ static void draw(void) {
 				(i > 0 && playlist_active == i - 1);
 
 			if (i == playlist_cursor)
-				style = SIDEBAR_SELECTED;
+				style = sidebar_focused ? SIDEBAR_SELECTED : SIDEBAR_CURSOR;
 			else if (is_active)
 				style = SIDEBAR_ACCENT_BOLD;
 
@@ -653,7 +659,7 @@ static void draw(void) {
 		const char *style = MAIN_BASE;
 
 		if (dpos == cursor) {
-			style = MAIN_SELECTED;
+			style = main_focused ? MAIN_SELECTED : MAIN_CURSOR;
 		} else if (sidx == delete_pending) {
 			style = MAIN_ACCENT_BOLD;
 		} else if (sidx == playing) {
@@ -708,7 +714,14 @@ static void draw(void) {
 		}
 		appendf(buf, &len, sizeof(buf), "%s %d:%02d", MAIN_BASE, dm, ds);
 	} else if (!searching) {
-		const char *help = "j/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit";
+		const char *help;
+		if (playlist_menu && sidebar_focused) {
+			help = "j/k:nav enter:apply C-j/k:focus C-m:hide esc:hide q:quit";
+		} else if (playlist_menu) {
+			help = "j/k:nav spc:play h/l:seek /:search C-j/k:focus C-m:hide q:quit";
+		} else {
+			help = "j/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit";
+		}
 		appendf(buf, &len, sizeof(buf),
 			"\033[%d;%dH%s%-*.*s%s",
 			rows, main_col, MAIN_DIM, main_cols, main_cols, help, MAIN_BASE);
@@ -944,7 +957,8 @@ int main(int argc, char **argv) {
 		if (read(STDIN_FILENO, &c, 1) != 1)
 			break;
 
-		/* CSI sequence detection for Ctrl+M */
+		int ctrl_j = 0;
+		int ctrl_k = (c == 0x0b);
 		int ctrl_m = 0;
 		if (c == 0x1b) {
 			char seq[32];
@@ -957,17 +971,39 @@ int main(int argc, char **argv) {
 				if (slen > 1 && seq[slen-1] >= 0x40) break;
 			}
 			seq[slen] = '\0';
-			if (strcmp(seq, "[109;5u") == 0) ctrl_m = 1;
+			if (strcmp(seq, "[106;5u") == 0) {
+				ctrl_j = 1;
+				c = 0;
+			} else if (strcmp(seq, "[107;5u") == 0) {
+				ctrl_k = 1;
+				c = 0;
+			} else if (strcmp(seq, "[109;5u") == 0) {
+				ctrl_m = 1;
+				c = 0;
+			}
 		}
 
 		if (ctrl_m) {
 			playlist_menu = !playlist_menu;
-			if (playlist_menu)
+			if (playlist_menu) {
 				playlist_cursor = (playlist_active >= 0) ? playlist_active + 1 : 0;
+				panel_focus = PANEL_SIDEBAR;
+			} else {
+				panel_focus = PANEL_MAIN;
+			}
 			save_state();
 			draw();
 			continue;
 		}
+
+		if ((ctrl_j || ctrl_k) && playlist_menu && !searching) {
+			panel_focus = (panel_focus == PANEL_SIDEBAR) ? PANEL_MAIN : PANEL_SIDEBAR;
+			save_state();
+			draw();
+			continue;
+		}
+		if (ctrl_j || ctrl_k)
+			c = 0;
 
 		if (searching) {
 			if (c == '\r' || c == '\n') {
@@ -993,9 +1029,10 @@ int main(int argc, char **argv) {
 			continue;
 		}
 
-		if (playlist_menu) {
+		if (playlist_menu && panel_focus == PANEL_SIDEBAR) {
 			switch (c) {
 			case 0x03: /* Ctrl+C */
+			case 'q':
 				cleanup();
 				return 0;
 			case 'j':
@@ -1019,15 +1056,16 @@ int main(int argc, char **argv) {
 					playlist_active = playlist_cursor - 1;
 					load_playlist(playlist_active);
 				}
-				playlist_menu = 0;
 				searching = 0;
 				search_buf[0] = '\0';
 				search_len = 0;
 				filter_active = 0;
 				cursor = 0;
+				delete_pending = -1;
 				break;
 			case 0x1b:
 				playlist_menu = 0;
+				panel_focus = PANEL_MAIN;
 				break;
 			}
 			save_state();

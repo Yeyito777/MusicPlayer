@@ -37,7 +37,11 @@ start_resume() {
 }
 
 send() {
-	tmux send-keys -t "$SESSION" "$1"
+	if [ "$1" = "Enter" ]; then
+		send_seq $'\r'
+	else
+		tmux send-keys -t "$SESSION" "$1"
+	fi
 }
 
 send_seq() {
@@ -381,9 +385,30 @@ send j
 wait_ms 200
 send Enter
 wait_ms 300
+assert_contains "playlist selection keeps sidebar open" "Playlists"
 assert_contains "playlist filters to alpha" "alpha.mp3"
 assert_contains "playlist filters to gamma" "gamma.ogg"
 assert_not_contains "playlist hides beta" "beta.flac"
+
+echo ""
+echo "Playlist sidebar: focus carousel"
+start
+send_seq $'\033[109;5u'
+wait_ms 200
+send_seq $'\033[106;5u'
+wait_ms 200
+send j
+wait_ms 200
+assert_contains "Ctrl+J focuses main list" "> beta.flac"
+assert_contains "Ctrl+J keeps sidebar visible" "Playlists"
+send_seq $'\013'
+wait_ms 200
+send j
+wait_ms 200
+send Enter
+wait_ms 300
+assert_contains "Ctrl+K focuses sidebar again" "alpha.mp3"
+assert_not_contains "Ctrl+K lets sidebar selection filter beta" "beta.flac"
 
 echo ""
 echo "Playlist sidebar: restore all songs"
@@ -394,8 +419,6 @@ send j
 wait_ms 200
 send Enter
 wait_ms 300
-send_seq $'\033[109;5u'
-wait_ms 200
 send g
 wait_ms 200
 send Enter
@@ -413,6 +436,8 @@ send j
 wait_ms 200
 send Enter
 wait_ms 300
+send_seq $'\033[106;5u'
+wait_ms 200
 send /
 send alpha
 wait_ms 300
