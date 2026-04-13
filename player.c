@@ -738,7 +738,7 @@ static void draw(void) {
 	} else if (!searching) {
 		const char *help;
 		if (playlist_menu && sidebar_focused) {
-			help = "j/k:nav enter:apply C-j/k:focus C-m:hide esc:hide q:quit";
+			help = "j/k:nav enter:apply spc:pause C-j/k:focus C-m:hide esc:hide q:quit";
 		} else if (playlist_menu) {
 			help = "j/k:nav spc:play h/l:seek /:search C-j/k:focus C-m:hide q:quit";
 		} else {
@@ -1076,6 +1076,12 @@ int main(int argc, char **argv) {
 				break;
 			case 'G':
 				playlist_cursor = nplaylists;
+				break;
+			case ' ':
+				if (mpv_pid > 0) {
+					mpv_cmd("{\"command\":[\"cycle\",\"pause\"]}\n");
+					paused = !paused;
+				}
 				break;
 			case '\r':
 				if (playlist_cursor == 0) {

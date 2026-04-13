@@ -411,6 +411,38 @@ assert_contains "Ctrl+K focuses sidebar again" "alpha.mp3"
 assert_not_contains "Ctrl+K lets sidebar selection filter beta" "beta.flac"
 
 echo ""
+echo "Playlist sidebar: space pauses playback"
+if [ "$HAS_MPV" -eq 1 ]; then
+	python3 -c "
+import wave
+with wave.open('$DIR/songs/test-tone.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(b'\x00\x00' * 88200)
+"
+	start
+	send j
+	send j
+	send j
+	wait_ms 200
+	send Enter
+	sleep 1
+	send_seq $'\033[109;5u'
+	wait_ms 200
+	send Space
+	wait_ms 300
+	assert_contains "space pauses from sidebar focus" "[paused]"
+	send_seq $'\033[109;5u'
+	wait_ms 200
+	send Escape
+	wait_ms 300
+	rm -f "$DIR/songs/test-tone.wav"
+else
+	skip "space pauses from sidebar focus (no mpv)"
+fi
+
+echo ""
 echo "Playlist sidebar: restore all songs"
 start
 send_seq $'\033[109;5u'
