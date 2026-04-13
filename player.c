@@ -540,6 +540,7 @@ static void draw(void) {
 	char line[4096];
 
 	int main_cols = cols;
+	int main_col = 1;
 	int sidebar_width = 0;
 	int sb_col = 0;
 
@@ -553,7 +554,8 @@ static void draw(void) {
 		main_cols = cols - sidebar_width - 1;
 		if (main_cols < 1)
 			main_cols = 1;
-		sb_col = main_cols + 2;
+		sb_col = 1;
+		main_col = sidebar_width + 2;
 
 		for (int r = 1; r <= rows; r++) {
 			appendf(buf, &len, sizeof(buf), "\033[%d;%dH%s", r, sb_col, SIDEBAR_BASE);
@@ -590,7 +592,7 @@ static void draw(void) {
 				sidebar_width, sidebar_width, line, MAIN_BASE);
 		}
 
-		int border_col = sb_col - 1;
+		int border_col = sidebar_width + 1;
 		for (int r = 1; r <= rows; r++) {
 			appendf(buf, &len, sizeof(buf),
 				"\033[%d;%dH%s|%s",
@@ -602,12 +604,12 @@ static void draw(void) {
 
 	if (playlist_active >= 0) {
 		appendf(buf, &len, sizeof(buf),
-			"\033[1;1H%s  MusicPlayer [%s]%s",
-			MAIN_ACCENT_BOLD, playlists[playlist_active], MAIN_BASE);
+			"\033[1;%dH%s  MusicPlayer [%s]%s",
+			main_col, MAIN_ACCENT_BOLD, playlists[playlist_active], MAIN_BASE);
 	} else {
 		appendf(buf, &len, sizeof(buf),
-			"\033[1;1H%s  MusicPlayer%s",
-			MAIN_ACCENT_BOLD, MAIN_BASE);
+			"\033[1;%dH%s  MusicPlayer%s",
+			main_col, MAIN_ACCENT_BOLD, MAIN_BASE);
 	}
 	{
 		int vbars = volume / 5;
@@ -627,7 +629,7 @@ static void draw(void) {
 		appendf(buf, &len, sizeof(buf), "%s]", MAIN_BASE);
 	}
 
-	appendf(buf, &len, sizeof(buf), "\033[2;1H%s", MAIN_ACCENT);
+	appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", main_col, MAIN_ACCENT);
 	append_repeat(buf, &len, sizeof(buf), '-', main_cols);
 	appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
@@ -668,8 +670,8 @@ static void draw(void) {
 
 		snprintf(line, sizeof(line), "%s%s%s", prefix, songs[sidx], suffix);
 		appendf(buf, &len, sizeof(buf),
-			"\033[%d;1H%s%-*.*s%s",
-			i + 3, style, main_cols, main_cols, line, MAIN_BASE);
+			"\033[%d;%dH%s%-*.*s%s",
+			i + 3, main_col, style, main_cols, main_cols, line, MAIN_BASE);
 	}
 
 	/* status lines at bottom */
@@ -683,8 +685,8 @@ static void draw(void) {
 
 		snprintf(line, sizeof(line), "%s%s %s", state, lmode, songs[playing]);
 		appendf(buf, &len, sizeof(buf),
-			"\033[%d;1H%s%-*.*s%s",
-			rows - 1, MAIN_ACCENT_BOLD, main_cols, main_cols, line, MAIN_BASE);
+			"\033[%d;%dH%s%-*.*s%s",
+			rows - 1, main_col, MAIN_ACCENT_BOLD, main_cols, main_cols, line, MAIN_BASE);
 
 		int bar_max = main_cols - 14;
 		if (bar_max < 4) bar_max = 4;
@@ -694,8 +696,8 @@ static void draw(void) {
 		if (filled > bar_max) filled = bar_max;
 
 		appendf(buf, &len, sizeof(buf),
-			"\033[%d;1H%s%d:%02d %s",
-			rows, MAIN_BASE, pm, ps, MAIN_ACCENT);
+			"\033[%d;%dH%s%d:%02d %s",
+			rows, main_col, MAIN_BASE, pm, ps, MAIN_ACCENT);
 		for (int i = 0; i < bar_max; i++) {
 			if (i < filled)
 				append_repeat(buf, &len, sizeof(buf), '=', 1);
@@ -708,15 +710,15 @@ static void draw(void) {
 	} else if (!searching) {
 		const char *help = "j/k:nav spc:play/pause h/l:seek -/+:vol m:loop n:shuffle d:del esc:stop q:quit";
 		appendf(buf, &len, sizeof(buf),
-			"\033[%d;1H%s%-*.*s%s",
-			rows, MAIN_DIM, main_cols, main_cols, help, MAIN_BASE);
+			"\033[%d;%dH%s%-*.*s%s",
+			rows, main_col, MAIN_DIM, main_cols, main_cols, help, MAIN_BASE);
 	}
 
 	if (searching) {
 		snprintf(line, sizeof(line), "/%s_", search_buf);
 		appendf(buf, &len, sizeof(buf),
-			"\033[%d;1H%s%-*.*s%s",
-			rows, MAIN_DIM, main_cols, main_cols, line, MAIN_BASE);
+			"\033[%d;%dH%s%-*.*s%s",
+			rows, main_col, MAIN_DIM, main_cols, main_cols, line, MAIN_BASE);
 	}
 
 	flush_buf(buf, &len);
