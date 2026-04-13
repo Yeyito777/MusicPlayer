@@ -82,6 +82,9 @@ static int filter_active = 0;
 #define SIDEBAR_SELECTED ANSI_RESET ANSI_BOLD FG_TEXT BG_ACCENT
 #define MAIN_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_APP
 #define SIDEBAR_DIM ANSI_RESET ANSI_DIM FG_TEXT BG_SIDEBAR
+#define SEP_H "─"
+#define SEP_V "│"
+#define SEP_CROSS "┼"
 
 static const char *playlists_dir = PLAYLISTS_DIR;
 static char *playlists[MAX_PLAYLISTS];
@@ -529,6 +532,11 @@ static void append_repeat(char *buf, int *len, size_t size, char ch, int count) 
 	}
 }
 
+static void append_repeat_text(char *buf, int *len, size_t size, const char *text, int count) {
+	for (int i = 0; i < count; i++)
+		appendf(buf, len, size, "%s", text);
+}
+
 static void draw(void) {
 	int rows = term_rows();
 	int cols = term_cols();
@@ -575,7 +583,7 @@ static void draw(void) {
 			sidebar_width, sidebar_width, " Playlists", MAIN_BASE);
 
 		appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", sb_col, SIDEBAR_ACCENT);
-		append_repeat(buf, &len, sizeof(buf), '-', sidebar_width);
+		append_repeat_text(buf, &len, sizeof(buf), SEP_H, sidebar_width);
 		appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
 		for (int i = 0; i <= nplaylists && i < list_rows; i++) {
@@ -600,9 +608,10 @@ static void draw(void) {
 
 		int border_col = sidebar_width + 1;
 		for (int r = 1; r <= rows; r++) {
+			const char *border = (r == 2) ? SEP_CROSS : SEP_V;
 			appendf(buf, &len, sizeof(buf),
-				"\033[%d;%dH%s|%s",
-				r, border_col, MAIN_ACCENT, MAIN_BASE);
+				"\033[%d;%dH%s%s%s",
+				r, border_col, MAIN_ACCENT, border, MAIN_BASE);
 		}
 	} else if (main_cols < 1) {
 		main_cols = 1;
@@ -636,7 +645,7 @@ static void draw(void) {
 	}
 
 	appendf(buf, &len, sizeof(buf), "\033[2;%dH%s", main_col, MAIN_ACCENT);
-	append_repeat(buf, &len, sizeof(buf), '-', main_cols);
+	append_repeat_text(buf, &len, sizeof(buf), SEP_H, main_cols);
 	appendf(buf, &len, sizeof(buf), "%s", MAIN_BASE);
 
 	/* song list — vim-style edge scrolling */
