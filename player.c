@@ -67,6 +67,7 @@ static int filter_active = 0;
 #define ANSI_DIM ESC "2m"
 #define FG_TEXT ESC "38;2;255;255;255m"
 #define FG_ACCENT ESC "38;2;29;155;240m"
+#define FG_DELETE ESC "38;2;254;107;107m"
 #define FG_BORDER_UNFOCUSED ESC "38;2;78;79;79m"
 #define BG_APP ESC "48;2;0;5;15m"
 #define BG_SIDEBAR ESC "48;2;3;8;20m"
@@ -75,6 +76,8 @@ static int filter_active = 0;
 #define SIDEBAR_BASE ANSI_RESET FG_TEXT BG_SIDEBAR
 #define MAIN_ACCENT ANSI_RESET FG_ACCENT BG_APP
 #define MAIN_ACCENT_BOLD ANSI_RESET ANSI_BOLD FG_ACCENT BG_APP
+#define MAIN_DELETE ANSI_RESET FG_DELETE BG_APP
+#define MAIN_DELETE_BOLD ANSI_RESET ANSI_BOLD FG_DELETE BG_APP
 #define MAIN_BORDER_FOCUSED ANSI_RESET FG_ACCENT BG_APP
 #define MAIN_BORDER_UNFOCUSED ANSI_RESET FG_BORDER_UNFOCUSED BG_APP
 #define MAIN_CURSOR ANSI_RESET ANSI_BOLD FG_TEXT BG_APP
@@ -687,10 +690,10 @@ static void draw(void) {
 		const char *prefix = (dpos == cursor) ? "> " : "  ";
 		const char *style = MAIN_BASE;
 
-		if (dpos == cursor) {
+		if (sidx == delete_pending) {
+			style = (dpos == cursor) ? MAIN_DELETE_BOLD : MAIN_DELETE;
+		} else if (dpos == cursor) {
 			style = main_focused ? MAIN_SELECTED : MAIN_CURSOR;
-		} else if (sidx == delete_pending) {
-			style = MAIN_ACCENT_BOLD;
 		} else if (sidx == playing) {
 			style = MAIN_ACCENT;
 		}
